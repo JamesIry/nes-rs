@@ -1,0 +1,1 @@
+Ultimataly targeted to being an NES emulator. Now it's just a 6502 emulator that passes functional tests of official opcodes but does not yet support unofficial opcodes.
