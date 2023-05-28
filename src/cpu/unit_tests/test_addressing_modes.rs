@@ -1,13 +1,12 @@
 use super::super::*;
-use crate::ram::RAM;
+
 use instructions::Instruction::*;
 use instructions::Mode::*;
 
 #[test]
 fn test_read_modes() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
     cpu.pc = 0;
@@ -88,9 +87,8 @@ fn test_read_modes() {
 
 #[test]
 fn test_write_modes() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
     cpu.pc = 0;

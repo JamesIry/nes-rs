@@ -1,4 +1,4 @@
-use crate::device::BusDevice;
+use crate::bus::BusDevice;
 
 static RANGE_START: u16 = 0x4000;
 static RANGE_END: u16 = 0x401F;
@@ -22,7 +22,7 @@ impl APU {
 }
 
 impl BusDevice for APU {
-    fn read_from_cpu_bus(&mut self, addr: u16) -> Option<u8> {
+    fn read(&mut self, addr: u16) -> Option<u8> {
         if addr >= RANGE_START && addr <= RANGE_END {
             Some(self.registers[APU::physical(addr)])
         } else {
@@ -30,7 +30,7 @@ impl BusDevice for APU {
         }
     }
 
-    fn write_to_cpu_bus(&mut self, addr: u16, data: u8) -> Option<u8> {
+    fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
         if addr >= RANGE_START && addr <= RANGE_END {
             let old = self.registers[APU::physical(addr)];
             self.registers[APU::physical(addr)] = data;

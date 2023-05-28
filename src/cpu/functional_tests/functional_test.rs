@@ -6,20 +6,18 @@ use std::{
 };
 
 use super::super::*;
-use crate::ram::RAM;
 
 #[test]
 fn functional_test() {
-    let mut cpu = CPU::default();
+    let (cpu, mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
-    let mut mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
     // load the bin file into ram
     let file = File::open("resources/test/6502_functional_test.bin").unwrap();
     let mut reader = BufReader::new(file);
-    mem.raw().truncate(0);
-    reader.read_to_end(mem.raw()).unwrap();
+    mem.as_ref().borrow_mut().raw().truncate(0);
+    reader.read_to_end(mem.as_ref().borrow_mut().raw()).unwrap();
 
-    cpu.add_bus_device(mem);
     // cpu.monitor = Box::new(cpu::monitor::LoggingMonitor::new());
 
     // get the cpu ready to run the test code
@@ -30,12 +28,9 @@ fn functional_test() {
         cpu.run_instruction();
     }
 
-    #[allow(clippy::assertions_on_constants)]
-    if cpu.pc != 0x3469 {
-        println!(
-            "Stuck [ a {:#04x} | x {:#04x} | y {:#04x} | sp {:#04x} | status {:#04x}  | pc {:#06x} ]",
-            cpu.a, cpu.x, cpu.y, cpu.sp, cpu.status, cpu.pc);
-
-        assert!(false);
-    }
+    assert_eq!(
+        0x3469, cpu.pc,
+        "Stuck [ a {:#04x} | x {:#04x} | y {:#04x} | sp {:#04x} | status {:#04x}  | pc {:#06x} ]",
+        cpu.a, cpu.x, cpu.y, cpu.sp, cpu.status, cpu.pc,
+    );
 }

@@ -17,9 +17,13 @@ pub mod flags;
 pub mod instructions;
 pub mod monitor;
 
+use std::cell::RefCell;
+use std::rc::Weak;
+
+use crate::bus::Bus;
+use crate::bus::Processor;
 use crate::cpu::flags::*;
 use crate::cpu::instructions::*;
-use crate::device::BusDevice;
 
 use self::monitor::Monitor;
 use self::monitor::NulMonitor;
@@ -43,7 +47,6 @@ pub struct CPU {
     pub cycles: usize,
     jammed: bool,
     trapped: bool,
-    bus: Vec<Box<dyn BusDevice>>,
     // internal state of executing instuciton
     instruction: Instruction,
     mode: Mode,
@@ -52,6 +55,7 @@ pub struct CPU {
     cycle_on_page_boundary: bool,
     interrupt: Option<Interrupt>,
     pub monitor: Box<dyn Monitor>,
+    bus: Weak<RefCell<Bus>>,
 }
 
 impl Default for CPU {
@@ -60,31 +64,12 @@ impl Default for CPU {
     }
 }
 
-impl CPU {
-    pub fn new(cpu_type: CPUType) -> Self {
-        Self {
-            cpu_type,
-            a: 0,
-            x: 0,
-            y: 0,
-            status: Flag::Break | Flag::Unused,
-            sp: 0,
-            pc: 0,
-            jammed: true,
-            trapped: false,
-            bus: Vec::new(),
-            instruction: Instruction::NOP,
-            mode: Mode::Imp,
-            remaining_cycles: 0,
-            extra_cycles: 0,
-            cycle_on_page_boundary: false,
-            interrupt: None,
-            cycles: 0,
-            monitor: Box::new(NulMonitor {}),
-        }
+impl Processor for CPU {
+    fn stuck(&self) -> bool {
+        self.jammed || self.trapped
     }
 
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.cycles = 0;
         // while other interrupts will wait for the current instruction
         // to complete, reset starts on the next clock
@@ -95,46 +80,21 @@ impl CPU {
         self.trapped = false;
     }
 
-    pub fn nmi(&mut self) {
+    fn nmi(&mut self) {
         if self.interrupt != Some(Interrupt::RST) {
             self.interrupt = Some(Interrupt::NMI);
         }
         self.trapped = false;
     }
 
-    pub fn irq(&mut self) {
+    fn irq(&mut self) {
         if self.interrupt.is_none() && !self.read_flag(Flag::InterruptDisable) {
             self.interrupt = Some(Interrupt::IRQ);
             self.trapped = false;
         }
     }
 
-    #[cfg(test)]
-    pub fn reset_to(&mut self, addr: u16) -> u8 {
-        self.reset();
-        let cycles = self.run_instruction();
-        self.pc = addr;
-        cycles
-    }
-
-    #[cfg(test)]
-    pub fn run_instruction(&mut self) -> u8 {
-        let mut cycles = 0;
-
-        if self.remaining_cycles == 0 && self.extra_cycles == 0 {
-            self.clock();
-            cycles += 1;
-        }
-        while self.remaining_cycles != 0 || self.extra_cycles != 0 {
-            self.clock();
-
-            cycles += 1;
-        }
-
-        cycles
-    }
-
-    pub fn clock(&mut self) {
+    fn clock(&mut self) {
         if self.jammed {
             return;
         }
@@ -190,6 +150,60 @@ impl CPU {
             self.cycle_on_page_boundary = cycle_on_boundary;
         }
         self.cycles += 1;
+    }
+
+    fn set_bus(&mut self, bus: std::rc::Weak<std::cell::RefCell<Bus>>) {
+        self.bus = bus;
+    }
+}
+
+impl CPU {
+    pub fn new(cpu_type: CPUType) -> Self {
+        Self {
+            cpu_type,
+            a: 0,
+            x: 0,
+            y: 0,
+            status: Flag::Break | Flag::Unused,
+            sp: 0,
+            pc: 0,
+            jammed: true,
+            trapped: false,
+            instruction: Instruction::NOP,
+            mode: Mode::Imp,
+            remaining_cycles: 0,
+            extra_cycles: 0,
+            cycle_on_page_boundary: false,
+            interrupt: None,
+            cycles: 0,
+            monitor: Box::new(NulMonitor {}),
+            bus: Weak::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn reset_to(&mut self, addr: u16) -> u8 {
+        self.reset();
+        let cycles = self.run_instruction();
+        self.pc = addr;
+        cycles
+    }
+
+    #[cfg(test)]
+    pub fn run_instruction(&mut self) -> u8 {
+        let mut cycles = 0;
+
+        if self.remaining_cycles == 0 && self.extra_cycles == 0 {
+            self.clock();
+            cycles += 1;
+        }
+        while self.remaining_cycles != 0 || self.extra_cycles != 0 {
+            self.clock();
+
+            cycles += 1;
+        }
+
+        cycles
     }
 
     fn interrupt(&mut self, interrupt: Interrupt) -> (PageBoundary, Branch) {
@@ -712,17 +726,8 @@ impl CPU {
         }
     }
 
-    pub fn add_bus_device(&mut self, device: Box<dyn BusDevice>) {
-        self.bus.push(device)
-    }
-
     pub fn read_bus_byte(&mut self, addr: u16) -> u8 {
-        for device in &mut self.bus {
-            if let Some(data) = device.read_from_cpu_bus(addr) {
-                return data;
-            }
-        }
-        0
+        self.bus.upgrade().unwrap().as_ref().borrow().read(addr)
     }
 
     pub fn read_bus_word(&mut self, addr: u16) -> u16 {
@@ -732,12 +737,12 @@ impl CPU {
     }
 
     pub fn write_bus_byte(&mut self, addr: u16, data: u8) -> u8 {
-        for device in &mut self.bus {
-            if let Some(data) = device.write_to_cpu_bus(addr, data) {
-                return data;
-            }
-        }
-        0
+        self.bus
+            .upgrade()
+            .unwrap()
+            .as_ref()
+            .borrow()
+            .write(addr, data)
     }
 
     fn low_byte(value: u16) -> u8 {
@@ -808,10 +813,6 @@ impl CPU {
             CPUType::RP2A03 => false,
             CPUType::MOS6502 => true,
         }
-    }
-
-    pub fn stuck(&self) -> bool {
-        self.jammed || self.trapped
     }
 
     // all the unofficial nops need to have side effects

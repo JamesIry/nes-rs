@@ -1,10 +1,10 @@
 #![allow(clippy::field_reassign_with_default)]
 
+use crate::bus::Bus;
 use crate::cpu::flags::*;
 use crate::cpu::instructions::Instruction::*;
 use crate::cpu::instructions::Mode::*;
 use crate::cpu::*;
-use crate::ram::RAM;
 
 #[test]
 fn test_nop() {
@@ -99,7 +99,8 @@ fn test_flags() {
 
 #[test]
 fn test_increments() {
-    let mut cpu = CPU::default();
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
     cpu.x = 0x44;
@@ -138,8 +139,6 @@ fn test_increments() {
     );
     assert_eq!(0x46, cpu.y);
 
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
     cpu.write_bus_byte(0, 0x01);
     cpu.write_bus_byte(1, 0xFF);
     cpu.pc = 0;
@@ -208,11 +207,11 @@ fn test_transfers() {
 
 #[test]
 fn test_load_store() {
-    let mut cpu = CPU::default();
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
+
     cpu.status = 0;
 
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
     cpu.write_bus_byte(0, 0x7F);
     cpu.write_bus_byte(1, 0x00);
     cpu.write_bus_byte(2, 0xFF);
@@ -310,7 +309,8 @@ fn test_load_store() {
 
 #[test]
 fn test_shift() {
-    let mut cpu = CPU::default();
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.set_flag(Flag::Carry, false);
     cpu.a = 0x42;
@@ -348,8 +348,6 @@ fn test_shift() {
     assert!(cpu.read_flag(Flag::Carry));
     assert_eq!(0b00100101, cpu.a);
 
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
     cpu.write_bus_byte(0, 0x01);
 
     cpu.pc = 0;
@@ -407,9 +405,8 @@ fn test_shift() {
 
 #[test]
 fn test_logic() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0, 0x0F);
 
@@ -440,9 +437,8 @@ fn test_logic() {
 
 #[test]
 fn test_bit() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0, 0x01);
     cpu.write_bus_byte(1, 0b11000000);
@@ -496,9 +492,8 @@ fn test_bit() {
 
 #[test]
 fn test_compare() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0, 0x42);
 
@@ -557,9 +552,8 @@ fn test_compare() {
 
 #[test]
 fn test_branch() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.status = 0;
 
@@ -711,9 +705,8 @@ fn test_branch() {
 
 #[test]
 fn test_stack() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.sp = 0xFF;
 
     cpu.a = 0x42;
@@ -768,9 +761,8 @@ fn test_stack() {
 
 #[test]
 fn test_adc_binary() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.set_flag(Flag::Decimal, false);
 
     cpu.set_flag(Flag::Carry, false);
@@ -832,9 +824,8 @@ fn test_adc_binary() {
 
 #[test]
 fn test_adc_decimal() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.set_flag(Flag::Decimal, true);
 
     cpu.set_flag(Flag::Carry, false);
@@ -873,9 +864,8 @@ fn test_adc_decimal() {
 
 #[test]
 fn test_sbc_binary() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.set_flag(Flag::Decimal, false);
 
     cpu.set_flag(Flag::Carry, true);
@@ -937,9 +927,8 @@ fn test_sbc_binary() {
 
 #[test]
 fn test_sbc_decimal() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.set_flag(Flag::Decimal, true);
 
     cpu.set_flag(Flag::Carry, true);
@@ -989,9 +978,8 @@ fn test_sbc_decimal() {
 
 #[test]
 fn test_jmp() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x34);
@@ -1027,9 +1015,8 @@ fn test_jmp() {
 
 #[test]
 fn test_jsr_rts() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
     cpu.sp = 0xFF;
@@ -1058,9 +1045,8 @@ fn test_jsr_rts() {
 
 #[test]
 fn test_brk_rti() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
     cpu.sp = 0xFF;

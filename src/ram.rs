@@ -1,4 +1,4 @@
-use crate::device::BusDevice;
+use crate::bus::BusDevice;
 
 pub struct RAM {
     start_addr: u16,
@@ -31,7 +31,7 @@ impl RAM {
 }
 
 impl BusDevice for RAM {
-    fn read_from_cpu_bus(&mut self, addr: u16) -> Option<u8> {
+    fn read(&mut self, addr: u16) -> Option<u8> {
         if addr >= self.start_addr && addr <= self.end_addr {
             let data = self.memory[self.physical(addr)];
             Some(data)
@@ -40,7 +40,7 @@ impl BusDevice for RAM {
         }
     }
 
-    fn write_to_cpu_bus(&mut self, addr: u16, data: u8) -> Option<u8> {
+    fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
         if addr >= self.start_addr && addr <= self.end_addr {
             let physical = self.physical(addr);
             let old = self.memory[physical];

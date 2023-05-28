@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use mappers::{CartridgeCpuLocation, Mapper};
 
-use crate::device::BusDevice;
+use crate::bus::BusDevice;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum MirrorType {
@@ -133,7 +133,7 @@ impl Cartridge {
 }
 
 impl BusDevice for Cartridge {
-    fn read_from_cpu_bus(&mut self, addr: u16) -> Option<u8> {
+    fn read(&mut self, addr: u16) -> Option<u8> {
         let location = self.translate_cpu_addr(addr);
         match location {
             mappers::CartridgeCpuLocation::None => None,
@@ -149,7 +149,7 @@ impl BusDevice for Cartridge {
         }
     }
 
-    fn write_to_cpu_bus(&mut self, addr: u16, data: u8) -> Option<u8> {
+    fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
         let location = self.translate_cpu_addr(addr);
         match location {
             mappers::CartridgeCpuLocation::None => None,

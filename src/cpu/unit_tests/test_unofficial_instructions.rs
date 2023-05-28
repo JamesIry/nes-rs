@@ -4,15 +4,12 @@ use crate::cpu::flags::*;
 use crate::cpu::instructions::Instruction::*;
 use crate::cpu::instructions::Mode::*;
 use crate::cpu::*;
-use crate::ram::RAM;
 
 #[test]
 fn test_load_store_unofficial() {
-    let mut cpu = CPU::default();
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
-
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
 
     cpu.pc = 0;
     cpu.y = 4;
@@ -96,9 +93,8 @@ fn test_load_store_unofficial() {
 
 #[test]
 fn test_logic_unofficial() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.pc = 0;
     cpu.a = 0b10010110;

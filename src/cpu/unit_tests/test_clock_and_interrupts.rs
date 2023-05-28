@@ -1,11 +1,9 @@
 use crate::cpu::*;
-use crate::ram::RAM;
 
 #[test]
 fn test_reset() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0xFFFC, 0x34);
     cpu.write_bus_byte(0xFFFD, 0x12);
@@ -26,9 +24,8 @@ fn test_reset() {
 
 #[test]
 fn test_nmi() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0xFFFC, 0x34);
     cpu.write_bus_byte(0xFFFD, 0x12);
@@ -53,9 +50,8 @@ fn test_nmi() {
 
 #[test]
 fn test_irq() {
-    let mut cpu = CPU::default();
-    let mem = Box::new(RAM::new(0x0000, 0xFFFF, 0xFFFF));
-    cpu.add_bus_device(mem);
+    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0xFFFC, 0x34);
     cpu.write_bus_byte(0xFFFD, 0x12);

@@ -1,9 +1,12 @@
 use std::any::Any;
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Cursor, Write};
 use std::mem::swap;
+use std::rc::Rc;
 
 use crate::apu::APU;
+use crate::bus::Bus;
 use crate::cartridge::Cartridge;
 use crate::cpu::decode::decode;
 use crate::cpu::flags::Flag;
@@ -19,29 +22,44 @@ use anyhow::Result;
  */
 #[test]
 fn test() {
-    let mut cpu = CPU::new(CPUType::RP2A03);
+    let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
+    let bus = Bus::new(cpu.clone());
 
     // 0x0000 - 0x1FFFF RAM
     // NES ram is physically only 0x0000 - 0x07FF, but it's then "mirrored" 3 more
     // times to 0x1FFF. "Mirroring" can be accomplished by masking off some bits
-    cpu.add_bus_device(Box::new(RAM::new(0x0000, 0x1FFF, 0x07FF)));
+
+    bus.as_ref()
+        .borrow_mut()
+        .add_device(Rc::new(RefCell::new(RAM::new(0x0000, 0x1FFF, 0x07FF))));
     //0x2000 - 0x3FFF  PPU Registers from 0x2000 to 0x2007 and then mirrored with mask 0x0007
-    cpu.add_bus_device(Box::new(PPU::new()));
+    bus.as_ref()
+        .borrow_mut()
+        .add_device(Rc::new(RefCell::new(PPU::new())));
     //0x4000 - 0x4017  APU and IO registers
     //0x4018 - 0x401F  APU and IO functionality that is disabled
-    cpu.add_bus_device(Box::new(APU::new()));
+    bus.as_ref()
+        .borrow_mut()
+        .add_device(Rc::new(RefCell::new(APU::new())));
     //0x4020 - 0xFFFF  Cartridge space
-    cpu.add_bus_device(Box::new(
+    bus.as_ref().borrow_mut().add_device(Rc::new(RefCell::new(
         Cartridge::load("resources/test/nestest.nes").unwrap(),
-    ));
+    )));
 
-    cpu.monitor = Box::new(NestestMonitor::new());
-    cpu.reset_to(0xC000);
+    bus.as_ref().borrow_mut().irq(); // just calling to avoid unused warning for now
+    bus.as_ref().borrow_mut().nmi(); // just calling to avoid unused warning for now
 
-    // now loop until trapped or halted or past the end of the log
-    while !cpu.stuck() && cpu.cycles <= 26560 {
-        cpu.clock();
+    bus.as_ref().borrow_mut().reset();
+
+    cpu.as_ref().borrow_mut().monitor = Box::new(NestestMonitor::new());
+    cpu.as_ref().borrow_mut().reset_to(0xC000);
+
+    // now loop until trapped or halted
+    while !bus.borrow().stuck() && cpu.borrow().cycles <= 26560 {
+        bus.borrow().clock();
     }
+
+    let mut cpu = cpu.as_ref().borrow_mut();
 
     assert_eq!(0, cpu.read_bus_byte(0x02));
     assert_eq!(0, cpu.read_bus_byte(0x03));
