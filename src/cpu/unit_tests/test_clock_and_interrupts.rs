@@ -1,4 +1,4 @@
-use super::super::*;
+use crate::cpu::*;
 use crate::ram::RAM;
 
 #[test]

@@ -1,18 +1,28 @@
 // https://c74project.com/microcode/
 
 #[cfg(test)]
-mod test {
-    mod functional_test;
+mod unit_tests {
     mod test_addressing_modes;
     mod test_clock_and_interrupts;
     mod test_decode;
     mod test_instructions;
+    mod test_unofficial_instructions;
 }
-mod decode;
+#[cfg(test)]
+mod functional_tests {
+    mod functional_test;
+}
+pub mod decode;
+pub mod flags;
+pub mod instructions;
+pub mod monitor;
 
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not};
-
+use crate::cpu::flags::*;
+use crate::cpu::instructions::*;
 use crate::device::BusDevice;
+
+use self::monitor::Monitor;
+use self::monitor::NulMonitor;
 
 static NMI_ADDR: u16 = 0xFFFA;
 static RESET_ADDR: u16 = 0xFFFC;
@@ -30,7 +40,8 @@ pub struct CPU {
     pub status: u8,
     pub sp: u8,
     pub pc: u16,
-    halted: bool,
+    pub cycles: usize,
+    jammed: bool,
     trapped: bool,
     bus: Vec<Box<dyn BusDevice>>,
     // internal state of executing instuciton
@@ -40,6 +51,7 @@ pub struct CPU {
     extra_cycles: u8,
     cycle_on_page_boundary: bool,
     interrupt: Option<Interrupt>,
+    pub monitor: Box<dyn Monitor>,
 }
 
 impl Default for CPU {
@@ -55,10 +67,10 @@ impl CPU {
             a: 0,
             x: 0,
             y: 0,
-            status: Flag::Break | Flag::Unused | Flag::Zero,
+            status: Flag::Break | Flag::Unused,
             sp: 0,
             pc: 0,
-            halted: true,
+            jammed: true,
             trapped: false,
             bus: Vec::new(),
             instruction: Instruction::NOP,
@@ -67,15 +79,18 @@ impl CPU {
             extra_cycles: 0,
             cycle_on_page_boundary: false,
             interrupt: None,
+            cycles: 0,
+            monitor: Box::new(NulMonitor {}),
         }
     }
 
     pub fn reset(&mut self) {
+        self.cycles = 0;
         // while other interrupts will wait for the current instruction
         // to complete, reset starts on the next clock
         self.remaining_cycles = 0;
         self.extra_cycles = 0;
-        self.halted = false;
+        self.jammed = false;
         self.interrupt = Some(Interrupt::RST);
         self.trapped = false;
     }
@@ -120,7 +135,7 @@ impl CPU {
     }
 
     pub fn clock(&mut self) {
-        if self.halted {
+        if self.jammed {
             return;
         }
 
@@ -133,6 +148,7 @@ impl CPU {
                 if branch_taken == Branch::Taken {
                     self.extra_cycles += 1;
                 }
+                self.monitor.end_instruction().unwrap(); // TODO propogate error
             }
             self.remaining_cycles -= 1;
         } else if self.extra_cycles > 0 {
@@ -151,6 +167,17 @@ impl CPU {
                     (instruction, Mode::Imp, 7, false)
                 }
                 None => {
+                    self.monitor
+                        .new_instruction(
+                            self.cycles,
+                            self.pc,
+                            self.sp,
+                            self.a,
+                            self.x,
+                            self.y,
+                            self.status,
+                        )
+                        .unwrap(); // TODO propogate error
                     let op = self.fetch_byte();
                     crate::cpu::decode::decode(op)
                 }
@@ -158,10 +185,11 @@ impl CPU {
 
             self.instruction = instruction;
             self.mode = mode;
-            self.remaining_cycles = cycles - 1;
+            self.remaining_cycles = cycles.wrapping_sub(1);
             self.extra_cycles = 0;
             self.cycle_on_page_boundary = cycle_on_boundary;
         }
+        self.cycles += 1;
     }
 
     fn interrupt(&mut self, interrupt: Interrupt) -> (PageBoundary, Branch) {
@@ -179,8 +207,8 @@ impl CPU {
             };
 
             self.push_byte(status);
-            self.set_flag(Flag::InterruptDisable, true);
         }
+        self.set_flag(Flag::InterruptDisable, true);
 
         let addr = match interrupt {
             Interrupt::BRK => IRQ_ADDR,
@@ -217,6 +245,7 @@ impl CPU {
 
     fn fetch_byte(&mut self) -> u8 {
         let value = self.read_bus_byte(self.pc);
+        self.monitor.fetch_instruction_byte(value).unwrap(); // TODO propogate error?
         self.pc = self.pc.wrapping_add(1);
         value
     }
@@ -265,7 +294,7 @@ impl CPU {
             Instruction::LDX => self.transfer(mode, Mode::X),
             Instruction::LDY => self.transfer(mode, Mode::Y),
             Instruction::LSR => self.shift_right(ShiftStyle::ShiftOff, mode),
-            Instruction::NOP => (PageBoundary::NotCrossed, Branch::NotTaken),
+            Instruction::NOP => self.nop(mode),
             Instruction::ORA => self.binary(|x, y| x | y, mode),
             Instruction::PHA => self.push(Mode::A),
             Instruction::PHP => self.push(Mode::Status),
@@ -291,6 +320,26 @@ impl CPU {
             Instruction::RST => self.interrupt(Interrupt::RST),
             Instruction::IRQ => self.interrupt(Interrupt::IRQ),
             Instruction::NMI => self.interrupt(Interrupt::NMI),
+            // unofficial instructions
+            Instruction::ANC => self.anc(mode),
+            Instruction::ASR => self.asr(mode),
+            Instruction::ARR => self.arr(mode),
+            Instruction::DCP => self.dcp(mode),
+            Instruction::ISC => self.isc(mode),
+            Instruction::JAM => self.jam(),
+            Instruction::LAS => self.las(mode),
+            Instruction::LAX => self.lax(mode),
+            Instruction::RLA => self.rla(mode),
+            Instruction::RRA => self.rra(mode),
+            Instruction::SAX => self.sax(mode),
+            Instruction::SBX => self.sbx(mode),
+            Instruction::SHA => self.sha(mode),
+            Instruction::SHS => self.shs(mode),
+            Instruction::SHX => self.shx(mode),
+            Instruction::SHY => self.shy(mode),
+            Instruction::SLO => self.slo(mode),
+            Instruction::SRE => self.sre(mode),
+            Instruction::XXA => self.xxa(mode),
         }
     }
 
@@ -332,7 +381,7 @@ impl CPU {
     fn binary(&mut self, f: fn(u8, u8) -> u8, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
         let m = self.read_value(location);
-        self.write_value((Location::A, PageBoundary::NotCrossed), f(self.a, m.0));
+        self.write_value(Location::A, f(self.a, m.0));
         (m.1, Branch::NotTaken)
     }
 
@@ -400,7 +449,7 @@ impl CPU {
             self.set_flag(Flag::Carry, tmp > 0xFF);
         };
 
-        self.write_value_without_flags((Location::A, PageBoundary::NotCrossed), (tmp & 0xFF) as u8);
+        self.write_value_without_flags(Location::A, (tmp & 0xFF) as u8);
         (m_orig.1, Branch::NotTaken)
     }
 
@@ -436,7 +485,7 @@ impl CPU {
 
         self.set_flag(Flag::Carry, tmp < 0x0100);
 
-        self.write_value_without_flags((Location::A, PageBoundary::NotCrossed), (tmp & 0xFF) as u8);
+        self.write_value_without_flags(Location::A, (tmp & 0xFF) as u8);
         (m_orig.1, Branch::NotTaken)
     }
 
@@ -472,7 +521,7 @@ impl CPU {
             self.push_word(self.pc.wrapping_sub(1));
         }
 
-        if let Location::Addr(addr) = location.0 {
+        if let Location::Addr(_, addr) = location {
             if condition {
                 // a jmp back to itself is the most common form of
                 // trap used in tests. Another common one is a conditional
@@ -481,18 +530,13 @@ impl CPU {
                 if starting_pc == addr {
                     self.trapped = true;
                 }
-                self.pc = addr
+                self.pc = addr;
+                (location.page_boundary(), Branch::Taken)
+            } else {
+                (PageBoundary::NotCrossed, Branch::NotTaken)
             }
-            (
-                location.1,
-                if condition {
-                    Branch::Taken
-                } else {
-                    Branch::NotTaken
-                },
-            )
         } else {
-            unreachable!("Branching to unsupported location {:?}", location.0)
+            unreachable!("Branching to unsupported location {:?}", location)
         }
     }
 
@@ -512,22 +556,29 @@ impl CPU {
         (value.1, Branch::NotTaken)
     }
 
-    fn read_value(&mut self, location: (Location, PageBoundary)) -> (u8, PageBoundary) {
-        let value = match location.0 {
+    fn read_value(&mut self, location: Location) -> (u8, PageBoundary) {
+        let boundary = &location.page_boundary();
+        let value = match location {
             Location::A => self.a,
             Location::X => self.x,
             Location::Y => self.y,
             Location::SP => self.sp,
             Location::Status => self.status,
-            Location::Addr(addr) => self.read_bus_byte(addr),
+            Location::Addr(_, addr) => {
+                let value = self.read_bus_byte(addr);
+                self.monitor.read_data_byte(addr, value).unwrap();
+                value
+            }
             Location::Imm => self.fetch_byte(),
-            Location::Imp => unreachable!("Attempt to read value on implied addressing mode"),
+            Location::Imp => {
+                unreachable!("Attempt to read value on implied addressing mode")
+            }
         };
 
-        (value, location.1)
+        (value, *boundary)
     }
 
-    fn write_value(&mut self, location: (Location, PageBoundary), value: u8) -> PageBoundary {
+    fn write_value(&mut self, location: Location, value: u8) -> PageBoundary {
         let page_boundary = self.write_value_without_flags(location, value);
 
         self.set_flag(Flag::Negative, value & SIGN_BIT != 0);
@@ -536,23 +587,27 @@ impl CPU {
         page_boundary
     }
 
-    fn write_value_without_flags(
-        &mut self,
-        location: (Location, PageBoundary),
-        value: u8,
-    ) -> PageBoundary {
-        match location.0 {
+    fn write_value_without_flags(&mut self, location: Location, value: u8) -> PageBoundary {
+        let boundary = &location.page_boundary();
+        match location {
             Location::A => self.a = value,
             Location::X => self.x = value,
             Location::Y => self.y = value,
             Location::SP => self.sp = value,
             Location::Status => self.status = value,
-            Location::Addr(addr) => self.write_bus_byte(addr, value),
-            Location::Imm => unreachable!("Attempt to write value on immediate addressing mode"),
-            Location::Imp => unreachable!("Attempt to write value on implied addressing mode"),
+            Location::Addr(_, addr) => {
+                let old = self.write_bus_byte(addr, value);
+                self.monitor.read_data_byte(addr, old).unwrap();
+            }
+            Location::Imm => {
+                unreachable!("Attempt to write value on immediate addressing mode")
+            }
+            Location::Imp => {
+                unreachable!("Attempt to write value on implied addressing mode")
+            }
         }
 
-        location.1
+        *boundary
     }
 
     fn set_flag(&mut self, flag: Flag, value: bool) -> (PageBoundary, Branch) {
@@ -568,57 +623,67 @@ impl CPU {
         (self.status & flag as u8) != 0
     }
 
-    fn get_location(&mut self, mode: Mode) -> (Location, PageBoundary) {
+    fn get_location(&mut self, mode: Mode) -> Location {
         match mode {
             Mode::Abs => {
                 let addr = self.fetch_word();
-                (Location::Addr(addr), PageBoundary::NotCrossed)
+                Location::Addr(addr, addr)
             }
             Mode::AbsX => {
                 let orig_addr = self.fetch_word();
                 let addr = orig_addr.wrapping_add(self.x as u16);
-
-                (Location::Addr(addr), CPU::page_changed(orig_addr, addr))
+                Location::Addr(orig_addr, addr)
             }
             Mode::AbsY => {
                 let orig_addr = self.fetch_word();
                 let addr = orig_addr.wrapping_add(self.y as u16);
-
-                (Location::Addr(addr), CPU::page_changed(orig_addr, addr))
+                Location::Addr(orig_addr, addr)
             }
-            Mode::Status => (Location::Status, PageBoundary::NotCrossed),
-            Mode::A => (Location::A, PageBoundary::NotCrossed),
-            Mode::X => (Location::X, PageBoundary::NotCrossed),
-            Mode::Y => (Location::Y, PageBoundary::NotCrossed),
-            Mode::SP => (Location::SP, PageBoundary::NotCrossed),
-            Mode::Imm => (Location::Imm, PageBoundary::NotCrossed),
-            Mode::Imp => (Location::Imp, PageBoundary::NotCrossed),
+            Mode::Status => Location::Status,
+            Mode::A => Location::A,
+            Mode::X => Location::X,
+            Mode::Y => Location::Y,
+            Mode::SP => Location::SP,
+            Mode::Imm => Location::Imm,
+            Mode::Imp => Location::Imp,
             Mode::AbsInd => {
                 let orig_addr = self.fetch_word();
-                let lb = self.read_bus_byte(orig_addr);
+                let lb = self.read_value(Location::Addr(orig_addr, orig_addr)).0;
                 // the 6502 has a bug where instead of incrementing the full address before
                 // reading the the next byte, it only increments the low byte of the address.
                 // Weird? yes. Hence never "JMP ($xxFF)" because what happens will be weird as it
                 // will read the address from $xxFF and then $xx00
                 let addr_high = CPU::high_byte(orig_addr);
                 let addr_low = CPU::low_byte(orig_addr).wrapping_add(1);
-                let hb = self.read_bus_byte(CPU::to_word(addr_low, addr_high));
+                let hb = self
+                    .read_value(Location::Addr(
+                        CPU::to_word(addr_low, addr_high),
+                        CPU::to_word(addr_low, addr_high),
+                    ))
+                    .0;
                 let addr = CPU::to_word(lb, hb);
-
-                (Location::Addr(addr), CPU::page_changed(orig_addr, addr))
+                Location::Addr(orig_addr, addr)
             }
             Mode::IndX => {
-                let zp_addr = self.fetch_byte().wrapping_add(self.x);
-                let addr = self.read_bus_word(zp_addr as u16);
-
-                (Location::Addr(addr), PageBoundary::NotCrossed)
+                let zp_addr_low = self.fetch_byte().wrapping_add(self.x) as u16;
+                let zp_addr_high = (zp_addr_low as u8).wrapping_add(1) as u16;
+                let addr_low = self.read_value(Location::Addr(zp_addr_low, zp_addr_low)).0;
+                let addr_high = self
+                    .read_value(Location::Addr(zp_addr_high, zp_addr_high))
+                    .0;
+                let addr = CPU::to_word(addr_low, addr_high);
+                Location::Addr(addr, addr)
             }
             Mode::IndY => {
-                let zp_addr = self.fetch_byte() as u16;
-                let orig_addr = self.read_bus_word(zp_addr);
+                let zp_addr_low = self.fetch_byte() as u16;
+                let zp_addr_high = (zp_addr_low as u8).wrapping_add(1) as u16;
+                let orig_addr_low = self.read_value(Location::Addr(zp_addr_low, zp_addr_low)).0;
+                let orig_addr_high = self
+                    .read_value(Location::Addr(zp_addr_high, zp_addr_high))
+                    .0;
+                let orig_addr = CPU::to_word(orig_addr_low, orig_addr_high);
                 let addr = orig_addr.wrapping_add(self.y as u16);
-
-                (Location::Addr(addr), CPU::page_changed(orig_addr, addr))
+                Location::Addr(orig_addr, addr)
             }
             Mode::Rel => {
                 let offset = self.fetch_byte();
@@ -629,28 +694,21 @@ impl CPU {
                     self.pc.wrapping_add(offset as u16)
                 };
 
-                (Location::Addr(new_pc), CPU::page_changed(self.pc, new_pc))
+                Location::Addr(self.pc, new_pc)
             }
+
             Mode::Zp => {
                 let addr = self.fetch_byte() as u16;
-                (Location::Addr(addr), PageBoundary::NotCrossed)
+                Location::Addr(addr, addr)
             }
             Mode::Zpx => {
                 let addr = (self.fetch_byte().wrapping_add(self.x)) as u16;
-                (Location::Addr(addr), PageBoundary::NotCrossed)
+                Location::Addr(addr, addr)
             }
             Mode::Zpy => {
                 let addr = (self.fetch_byte().wrapping_add(self.y)) as u16;
-                (Location::Addr(addr), PageBoundary::NotCrossed)
+                Location::Addr(addr, addr)
             }
-        }
-    }
-
-    fn page_changed(addr1: u16, addr2: u16) -> PageBoundary {
-        if (addr1 & HIGH_BYTE_MASK) != (addr2 & HIGH_BYTE_MASK) {
-            PageBoundary::Crossed
-        } else {
-            PageBoundary::NotCrossed
         }
     }
 
@@ -658,27 +716,28 @@ impl CPU {
         self.bus.push(device)
     }
 
-    pub fn read_bus_byte(&self, addr: u16) -> u8 {
-        for device in &self.bus {
-            if let Some(data) = device.read(addr) {
+    pub fn read_bus_byte(&mut self, addr: u16) -> u8 {
+        for device in &mut self.bus {
+            if let Some(data) = device.read_from_cpu_bus(addr) {
                 return data;
             }
         }
         0
     }
 
-    pub fn read_bus_word(&self, addr: u16) -> u16 {
+    pub fn read_bus_word(&mut self, addr: u16) -> u16 {
         let lb = self.read_bus_byte(addr);
         let hb = self.read_bus_byte(addr.wrapping_add(1));
         CPU::to_word(lb, hb)
     }
 
-    pub fn write_bus_byte(&mut self, addr: u16, data: u8) {
+    pub fn write_bus_byte(&mut self, addr: u16, data: u8) -> u8 {
         for device in &mut self.bus {
-            if device.write(addr, data) {
-                return;
+            if let Some(data) = device.write_to_cpu_bus(addr, data) {
+                return data;
             }
         }
+        0
     }
 
     fn low_byte(value: u16) -> u8 {
@@ -714,7 +773,7 @@ impl CPU {
                 0
             };
         let location = self.get_location(mode);
-        let page_boundary = if location.0 == Location::Status {
+        let page_boundary = if location == Location::Status {
             self.write_value_without_flags(location, value)
         } else {
             self.write_value(location, value)
@@ -752,7 +811,279 @@ impl CPU {
     }
 
     pub fn stuck(&self) -> bool {
-        self.halted || self.trapped
+        self.jammed || self.trapped
+    }
+
+    // all the unofficial nops need to have side effects
+    fn nop(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        match location {
+            Location::A => (),
+            Location::X => (),
+            Location::Y => (),
+            Location::SP => (),
+            Location::Status => (),
+            Location::Addr(_, _) => {
+                self.read_value(location);
+            }
+            Location::Imm => {
+                self.read_value(location);
+            }
+            Location::Imp => (),
+        }
+        (location.page_boundary(), Branch::NotTaken)
+    }
+
+    fn anc(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let result = self.binary(|a, m| a & m, mode);
+        self.set_flag(Flag::Carry, self.a & SIGN_BIT != 0);
+        result
+    }
+
+    fn arr(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let operand = self.read_value(location);
+        let anded = self.a & operand.0;
+        let value = (anded >> 1)
+            | if self.read_flag(Flag::Carry) {
+                SIGN_BIT
+            } else {
+                0
+            };
+
+        self.write_value(Location::A, value);
+        self.set_flag(
+            Flag::Overflow,
+            ((value & 0b010000000) >> 1) != value & 0b00100000,
+        );
+        if self.bcd_enabled() && self.read_flag(Flag::Decimal) {
+            self.set_flag(
+                Flag::Carry,
+                (operand.0 & 0xF0).wrapping_add(operand.0 & 0x10) > 0x50,
+            );
+        } else {
+            self.set_flag(Flag::Carry, value & 0b01000000 != 0);
+        }
+
+        (location.page_boundary(), Branch::NotTaken)
+    }
+
+    fn asr(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let orig = self.a & self.read_value(location).0;
+        let value = orig >> 1;
+
+        self.set_flag(Flag::Negative, false);
+        self.set_flag(Flag::Carry, orig & 1 != 0);
+        self.set_flag(Flag::Zero, value == 0);
+
+        self.a = value;
+        (location.page_boundary(), Branch::NotTaken)
+    }
+
+    fn dcp(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let value = self.read_value(location).0.wrapping_sub(1);
+
+        let diff = self.a.wrapping_sub(value);
+
+        self.set_flag(Flag::Negative, diff & SIGN_BIT != 0);
+        self.set_flag(Flag::Zero, diff == 0);
+        self.set_flag(Flag::Carry, value <= self.a);
+
+        (
+            self.write_value_without_flags(location, value),
+            Branch::NotTaken,
+        )
+    }
+
+    fn isc(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let m = self.read_value(location).0.wrapping_add(1);
+
+        let borrow = if self.read_flag(Flag::Carry) { 0 } else { 1 };
+
+        let tmp: u16 = (self.a as u16).wrapping_sub(m as u16).wrapping_sub(borrow);
+
+        self.set_flag(Flag::Negative, tmp & (SIGN_BIT as u16) != 0);
+        self.set_flag(Flag::Zero, tmp & LOW_BYTE_MASK == 0);
+        self.set_flag(
+            Flag::Overflow,
+            (self.a as u16 ^ tmp) & SIGN_BIT as u16 != 0 && (self.a ^ m) & SIGN_BIT != 0,
+        );
+
+        self.set_flag(Flag::Carry, tmp < 0x0100);
+
+        self.write_value_without_flags(Location::A, (tmp & 0xFF) as u8);
+        (
+            self.write_value_without_flags(location, m),
+            Branch::NotTaken,
+        )
+    }
+
+    fn jam(&mut self) -> (PageBoundary, Branch) {
+        self.jammed = true;
+        (PageBoundary::NotCrossed, Branch::NotTaken)
+    }
+
+    fn las(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let v1 = self.read_value(location);
+        let value = v1.0 & self.sp;
+        self.write_value(Location::A, value);
+        self.x = value;
+        self.sp = value;
+        (location.page_boundary(), Branch::NotTaken)
+    }
+
+    fn lax(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let value = self.read_value(location);
+        self.write_value(Location::A, value.0);
+        self.write_value_without_flags(Location::X, value.0);
+        (location.page_boundary(), Branch::NotTaken)
+    }
+
+    fn sax(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let value = self.a & self.x;
+        let location = self.get_location(mode);
+        (
+            self.write_value_without_flags(location, value),
+            Branch::NotTaken,
+        )
+    }
+
+    fn sha(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+
+        let value = CPU::h_plus_1(location);
+        let data = self.a & self.x & value;
+        (
+            self.write_value_without_flags(location, data),
+            Branch::NotTaken,
+        )
+    }
+
+    fn h_plus_1(location: Location) -> u8 {
+        match location {
+            Location::Addr(orig, _) => ((orig >> 8) as u8).wrapping_add(1),
+            _ => unreachable!("SHA, SHX, SHY, or TAS with invalid location {:?}", location),
+        }
+    }
+
+    fn rla(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let orig = self.read_value(location).0;
+        let m = (orig << 1) | if self.read_flag(Flag::Carry) { 1 } else { 0 };
+
+        self.set_flag(Flag::Carry, orig & SIGN_BIT != 0);
+        self.write_value(Location::A, self.a & m);
+        (
+            self.write_value_without_flags(location, m),
+            Branch::NotTaken,
+        )
+    }
+
+    fn rra(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let orig = self.read_value(location).0;
+        let m = (orig >> 1)
+            | if self.read_flag(Flag::Carry) {
+                SIGN_BIT
+            } else {
+                0
+            };
+
+        self.set_flag(Flag::Carry, orig & 1 != 0);
+
+        let value = (self.a as u16)
+            .wrapping_add(m as u16)
+            .wrapping_add((orig & 1) as u16);
+
+        if self.bcd_enabled() && self.read_flag(Flag::Decimal) {
+            self.set_flag(Flag::Carry, value > 0x99);
+        } else {
+            self.set_flag(Flag::Carry, value > 0xFF);
+        }
+
+        self.set_flag(
+            Flag::Overflow,
+            (self.a ^ m) & SIGN_BIT == 0 && (self.a as u16 ^ value) & SIGN_BIT as u16 != 0,
+        );
+
+        self.write_value(Location::A, (value & 0xFF) as u8);
+        (
+            self.write_value_without_flags(location, m),
+            Branch::NotTaken,
+        )
+    }
+
+    fn sbx(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let value = (self.a & self.x).wrapping_sub(self.read_value(location).0);
+
+        self.set_flag(Flag::Carry, (value & SIGN_BIT) == 0);
+
+        (self.write_value(Location::X, value), Branch::NotTaken)
+    }
+
+    fn shs(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let v1 = self.a & self.x;
+        self.sp = v1;
+        let location = self.get_location(mode);
+        let value = v1 & CPU::h_plus_1(location);
+        (
+            self.write_value_without_flags(location, value),
+            Branch::NotTaken,
+        )
+    }
+
+    fn shx(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let value = self.x & CPU::h_plus_1(location);
+        (
+            self.write_value_without_flags(location, value),
+            Branch::NotTaken,
+        )
+    }
+
+    fn shy(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let value = self.y & CPU::h_plus_1(location);
+        (
+            self.write_value_without_flags(location, value),
+            Branch::NotTaken,
+        )
+    }
+
+    fn slo(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let orig = self.read_value(location).0;
+        let m = orig << 1;
+
+        self.write_value_without_flags(location, m);
+        self.set_flag(Flag::Carry, orig & SIGN_BIT != 0);
+        self.write_value(Location::A, self.a | m);
+        (location.page_boundary(), Branch::NotTaken)
+    }
+
+    fn sre(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let orig = self.read_value(location).0;
+        let m = orig >> 1;
+
+        self.write_value_without_flags(location, m);
+        self.set_flag(Flag::Carry, orig & 1 != 0);
+        self.write_value(Location::A, self.a ^ m);
+        (location.page_boundary(), Branch::NotTaken)
+    }
+
+    fn xxa(&mut self, mode: Mode) -> (PageBoundary, Branch) {
+        let location = self.get_location(mode);
+        let m = self.read_value(location).0;
+        let value = (self.a | 0xEE) & self.x & m;
+        self.write_value(location, value);
+        (location.page_boundary(), Branch::NotTaken)
     }
 }
 
@@ -763,104 +1094,36 @@ pub enum CPUType {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Instruction {
-    ADC,
-    AND,
-    ASL,
-    BCC,
-    BCS,
-    BEQ,
-    BIT,
-    BMI,
-    BNE,
-    BPL,
-    BRK,
-    BVC,
-    BVS,
-    CLC,
-    CLD,
-    CLI,
-    CLV,
-    CMP,
-    CPX,
-    CPY,
-    DEC,
-    DEX,
-    DEY,
-    EOR,
-    INC,
-    INX,
-    INY,
-    JMP,
-    JSR,
-    LDA,
-    LDX,
-    LDY,
-    LSR,
-    NOP,
-    ORA,
-    PHA,
-    PHP,
-    PLA,
-    PLP,
-    ROL,
-    ROR,
-    RTI,
-    RTS,
-    SBC,
-    SEC,
-    SED,
-    SEI,
-    STA,
-    STX,
-    STY,
-    TAX,
-    TAY,
-    TSX,
-    TXA,
-    TXS,
-    TYA,
-    // the following aren't real instructions
-    // they're pseudo instructions used to
-    // implement interrupt logic
-    RST,
-    IRQ,
-    NMI,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Mode {
-    Abs,
-    AbsX,
-    AbsY,
-    A,
-    SP,
-    Status,
-    Imm,
-    Imp,
-    AbsInd,
-    IndX,
-    IndY,
-    Rel,
-    Zp,
-    Zpx,
-    Zpy,
-    // the following aren't real addressing modes of the 6502
-    // they are used internally to make implementation more uniform
-    X,
-    Y,
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum Location {
     A,
     X,
     Y,
     SP,
     Status,
-    Addr(u16),
+    Addr(u16, u16),
     Imm,
     Imp,
+}
+
+impl Location {
+    fn page_boundary(&self) -> PageBoundary {
+        match self {
+            Location::A => PageBoundary::NotCrossed,
+            Location::X => PageBoundary::NotCrossed,
+            Location::Y => PageBoundary::NotCrossed,
+            Location::SP => PageBoundary::NotCrossed,
+            Location::Status => PageBoundary::NotCrossed,
+            Location::Addr(addr1, addr2) => {
+                if (addr1 & HIGH_BYTE_MASK) != (addr2 & HIGH_BYTE_MASK) {
+                    PageBoundary::Crossed
+                } else {
+                    PageBoundary::NotCrossed
+                }
+            }
+            Location::Imm => PageBoundary::NotCrossed,
+            Location::Imp => PageBoundary::NotCrossed,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -901,84 +1164,4 @@ enum Interrupt {
     IRQ,
     NMI,
     RST,
-}
-
-#[repr(u8)]
-enum Flag {
-    Carry = 0b00000001,
-    Zero = 0b00000010,
-    InterruptDisable = 0b00000100,
-    Decimal = 0b00001000,
-    Break = 0b00010000,
-    Unused = 0b00100000,
-    Overflow = 0b01000000,
-    Negative = 0b10000000,
-}
-
-impl BitOr<Self> for Flag {
-    type Output = u8;
-
-    fn bitor(self, rhs: Self) -> Self::Output {
-        self as u8 | rhs as u8
-    }
-}
-
-impl BitOr<u8> for Flag {
-    type Output = u8;
-
-    fn bitor(self, rhs: u8) -> Self::Output {
-        self as u8 | rhs
-    }
-}
-
-impl BitOr<Flag> for u8 {
-    type Output = u8;
-
-    fn bitor(self, rhs: Flag) -> Self::Output {
-        self | rhs as u8
-    }
-}
-
-impl BitOrAssign<Flag> for u8 {
-    fn bitor_assign(&mut self, rhs: Flag) {
-        *self |= rhs as u8
-    }
-}
-
-impl BitAnd<Self> for Flag {
-    type Output = u8;
-
-    fn bitand(self, rhs: Self) -> Self::Output {
-        self as u8 & rhs as u8
-    }
-}
-
-impl BitAnd<u8> for Flag {
-    type Output = u8;
-
-    fn bitand(self, rhs: u8) -> Self::Output {
-        self as u8 & rhs
-    }
-}
-
-impl BitAnd<Flag> for u8 {
-    type Output = u8;
-
-    fn bitand(self, rhs: Flag) -> Self::Output {
-        self & rhs as u8
-    }
-}
-
-impl BitAndAssign<Flag> for u8 {
-    fn bitand_assign(&mut self, rhs: Flag) {
-        *self &= rhs as u8
-    }
-}
-
-impl Not for Flag {
-    type Output = u8;
-
-    fn not(self) -> Self::Output {
-        !(self as u8)
-    }
 }

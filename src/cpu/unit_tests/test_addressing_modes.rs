@@ -1,7 +1,7 @@
 use super::super::*;
 use crate::ram::RAM;
-use Instruction::*;
-use Mode::*;
+use instructions::Instruction::*;
+use instructions::Mode::*;
 
 #[test]
 fn test_read_modes() {

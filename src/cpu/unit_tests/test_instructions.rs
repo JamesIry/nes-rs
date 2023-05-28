@@ -1,9 +1,10 @@
 #![allow(clippy::field_reassign_with_default)]
 
-use super::super::*;
+use crate::cpu::flags::*;
+use crate::cpu::instructions::Instruction::*;
+use crate::cpu::instructions::Mode::*;
+use crate::cpu::*;
 use crate::ram::RAM;
-use Instruction::*;
-use Mode::*;
 
 #[test]
 fn test_nop() {
@@ -182,11 +183,15 @@ fn test_transfers() {
     assert_eq!(0x43, cpu.x);
 
     cpu.x = 0x44;
+    cpu.status = Flag::Negative | Flag::Zero;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(TXS, Imp)
     );
     assert_eq!(0x44, cpu.sp);
+    // TXS doesn't modify flags
+    assert_eq!(Flag::Negative | Flag::Zero, cpu.status);
+
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(TXA, Imp)
@@ -277,11 +282,14 @@ fn test_load_store() {
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x10);
     cpu.a = 0x83;
+    cpu.status = Flag::Zero | Flag::Negative;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(STA, Zp)
     );
     assert_eq!(0x83, cpu.read_bus_byte(0x10));
+    // stores don't modify flags
+    assert_eq!(Flag::Zero | Flag::Negative, cpu.status);
 
     cpu.write_bus_byte(1, 0x11);
     cpu.x = 0x84;
@@ -1060,12 +1068,13 @@ fn test_brk_rti() {
     cpu.write_bus_byte(0xfffe, 0x34);
     cpu.write_bus_byte(0xffff, 0x12);
     cpu.set_flag(Flag::Decimal, true);
+    cpu.set_flag(Flag::InterruptDisable, false);
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(BRK, Imp)
     );
     assert_eq!(0x1234, cpu.pc);
-    assert_eq!(Flag::Decimal | Flag::InterruptDisable as u8, cpu.status);
+    assert_eq!(Flag::Decimal | Flag::InterruptDisable, cpu.status);
     assert_eq!(0xFC, cpu.sp);
 
     assert_eq!(0x00, cpu.read_bus_byte(0x1FF));

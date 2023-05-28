@@ -20,9 +20,10 @@ fn functional_test() {
     reader.read_to_end(mem.raw()).unwrap();
 
     cpu.add_bus_device(mem);
+    // cpu.monitor = Box::new(cpu::monitor::LoggingMonitor::new());
 
     // get the cpu ready to run the test code
-    cpu.reset_to(0x400);
+    cpu.reset_to(0x0400);
 
     // now loop until trapped or halted
     while !cpu.stuck() {

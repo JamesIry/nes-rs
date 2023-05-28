@@ -1,6 +1,6 @@
 use super::super::*;
-use Instruction::*;
-use Mode::*;
+use instructions::Instruction::*;
+use instructions::Mode::*;
 
 #[test]
 fn test_decode() {
@@ -89,10 +89,10 @@ fn test_decode() {
     assert_eq!(decode(0xEE), (INC, Abs, 6, false));
     assert_eq!(decode(0xFE), (INC, AbsX, 7, false));
 
-    assert_eq!(decode(0x4C), (JMP, Abs, 3, false));
-    assert_eq!(decode(0x6C), (JMP, AbsInd, 5, false));
+    assert_eq!(decode(0x4C), (JMP, Abs, 2, false));
+    assert_eq!(decode(0x6C), (JMP, AbsInd, 4, false));
 
-    assert_eq!(decode(0x20), (JSR, Abs, 6, false));
+    assert_eq!(decode(0x20), (JSR, Abs, 5, false));
 
     assert_eq!(decode(0xA9), (LDA, Imm, 2, false));
     assert_eq!(decode(0xA5), (LDA, Zp, 3, false));
@@ -121,7 +121,7 @@ fn test_decode() {
     assert_eq!(decode(0x4E), (LSR, Abs, 6, false));
     assert_eq!(decode(0x5E), (LSR, AbsX, 7, false));
 
-    assert_eq!(decode(0xEA), (NOP, Imp, 2, false));
+    assert_eq!(decode(0x3A), (NOP, Imp, 2, false));
 
     assert_eq!(decode(0x09), (ORA, Imm, 2, false));
     assert_eq!(decode(0x05), (ORA, Zp, 3, false));
@@ -187,4 +187,136 @@ fn test_decode() {
     assert_eq!(decode(0x84), (STY, Zp, 3, false));
     assert_eq!(decode(0x94), (STY, Zpx, 4, false));
     assert_eq!(decode(0x8C), (STY, Abs, 4, false));
+}
+
+// unofficial opcodes
+#[test]
+fn test_decode_unofficial() {
+    use crate::cpu::decode::decode;
+
+    assert_eq!(decode(0x0B), (ANC, Imm, 2, false));
+    assert_eq!(decode(0x2B), (ANC, Imm, 2, false));
+
+    assert_eq!(decode(0x6B), (ARR, Imm, 2, false));
+
+    assert_eq!(decode(0x4B), (ASR, Imm, 2, false));
+
+    assert_eq!(decode(0xCF), (DCP, Abs, 6, false));
+    assert_eq!(decode(0xDF), (DCP, AbsX, 7, false));
+    assert_eq!(decode(0xDB), (DCP, AbsY, 7, false));
+    assert_eq!(decode(0xC7), (DCP, Zp, 5, false));
+    assert_eq!(decode(0xD7), (DCP, Zpx, 6, false));
+    assert_eq!(decode(0xC3), (DCP, IndX, 8, false));
+    assert_eq!(decode(0xD3), (DCP, IndY, 8, false));
+
+    assert_eq!(decode(0xEF), (ISC, Abs, 6, false));
+    assert_eq!(decode(0xFF), (ISC, AbsX, 7, false));
+    assert_eq!(decode(0xFB), (ISC, AbsY, 7, false));
+    assert_eq!(decode(0xE7), (ISC, Zp, 5, false));
+    assert_eq!(decode(0xF7), (ISC, Zpx, 6, false));
+    assert_eq!(decode(0xE3), (ISC, IndX, 8, false));
+    assert_eq!(decode(0xF3), (ISC, IndY, 8, false));
+
+    assert_eq!(decode(0x02), (JAM, Imp, 1, false));
+    assert_eq!(decode(0x12), (JAM, Imp, 1, false));
+    assert_eq!(decode(0x22), (JAM, Imp, 1, false));
+    assert_eq!(decode(0x32), (JAM, Imp, 1, false));
+    assert_eq!(decode(0x42), (JAM, Imp, 1, false));
+    assert_eq!(decode(0x52), (JAM, Imp, 1, false));
+    assert_eq!(decode(0x62), (JAM, Imp, 1, false));
+    assert_eq!(decode(0x72), (JAM, Imp, 1, false));
+    assert_eq!(decode(0x92), (JAM, Imp, 1, false));
+    assert_eq!(decode(0xB2), (JAM, Imp, 1, false));
+    assert_eq!(decode(0xD2), (JAM, Imp, 1, false));
+    assert_eq!(decode(0xF2), (JAM, Imp, 1, false));
+
+    assert_eq!(decode(0xBB), (LAS, AbsY, 4, true));
+
+    assert_eq!(decode(0xAB), (LAX, Imm, 2, false));
+    assert_eq!(decode(0xAF), (LAX, Abs, 4, false));
+    assert_eq!(decode(0xBF), (LAX, AbsY, 4, true));
+    assert_eq!(decode(0xA7), (LAX, Zp, 3, false));
+    assert_eq!(decode(0xB7), (LAX, Zpy, 4, false));
+    assert_eq!(decode(0xA3), (LAX, IndX, 6, false));
+    assert_eq!(decode(0xB3), (LAX, IndY, 5, true));
+
+    assert_eq!(decode(0x1A), (NOP, Imp, 2, false));
+    assert_eq!(decode(0x5A), (NOP, Imp, 2, false));
+    assert_eq!(decode(0x7A), (NOP, Imp, 2, false));
+    assert_eq!(decode(0xDA), (NOP, Imp, 2, false));
+    assert_eq!(decode(0xEA), (NOP, Imp, 2, false));
+    assert_eq!(decode(0xFA), (NOP, Imp, 2, false));
+    assert_eq!(decode(0x80), (NOP, Imm, 2, false));
+    assert_eq!(decode(0x82), (NOP, Imm, 2, false));
+    assert_eq!(decode(0x89), (NOP, Imm, 2, false));
+    assert_eq!(decode(0xC2), (NOP, Imm, 2, false));
+    assert_eq!(decode(0xE2), (NOP, Imm, 2, false));
+    assert_eq!(decode(0x0C), (NOP, Abs, 4, false));
+    assert_eq!(decode(0x1C), (NOP, AbsX, 4, true));
+    assert_eq!(decode(0x3C), (NOP, AbsX, 4, true));
+    assert_eq!(decode(0x5C), (NOP, AbsX, 4, true));
+    assert_eq!(decode(0x7C), (NOP, AbsX, 4, true));
+    assert_eq!(decode(0xDC), (NOP, AbsX, 4, true));
+    assert_eq!(decode(0xFC), (NOP, AbsX, 4, true));
+    assert_eq!(decode(0x04), (NOP, Zp, 3, false));
+    assert_eq!(decode(0x44), (NOP, Zp, 3, false));
+    assert_eq!(decode(0x64), (NOP, Zp, 3, false));
+    assert_eq!(decode(0x14), (NOP, Zpx, 4, false));
+    assert_eq!(decode(0x34), (NOP, Zpx, 4, false));
+    assert_eq!(decode(0x54), (NOP, Zpx, 4, false));
+    assert_eq!(decode(0x74), (NOP, Zpx, 4, false));
+    assert_eq!(decode(0xD4), (NOP, Zpx, 4, false));
+    assert_eq!(decode(0xF4), (NOP, Zpx, 4, false));
+
+    assert_eq!(decode(0x2F), (RLA, Abs, 6, false));
+    assert_eq!(decode(0x3F), (RLA, AbsX, 7, false));
+    assert_eq!(decode(0x3B), (RLA, AbsY, 7, false));
+    assert_eq!(decode(0x27), (RLA, Zp, 5, false));
+    assert_eq!(decode(0x37), (RLA, Zpx, 6, false));
+    assert_eq!(decode(0x23), (RLA, IndX, 8, false));
+    assert_eq!(decode(0x33), (RLA, IndY, 8, false));
+
+    assert_eq!(decode(0x6F), (RRA, Abs, 6, false));
+    assert_eq!(decode(0x7F), (RRA, AbsX, 7, false));
+    assert_eq!(decode(0x7B), (RRA, AbsY, 7, false));
+    assert_eq!(decode(0x67), (RRA, Zp, 5, false));
+    assert_eq!(decode(0x77), (RRA, Zpx, 6, false));
+    assert_eq!(decode(0x63), (RRA, IndX, 8, false));
+    assert_eq!(decode(0x73), (RRA, IndY, 8, false));
+
+    assert_eq!(decode(0x8F), (SAX, Abs, 4, false));
+    assert_eq!(decode(0x87), (SAX, Zp, 3, false));
+    assert_eq!(decode(0x97), (SAX, Zpy, 4, false));
+    assert_eq!(decode(0x83), (SAX, IndX, 6, false));
+
+    assert_eq!(decode(0xCB), (SBX, Imm, 2, false));
+
+    assert_eq!(decode(0xEB), (SBC, Imm, 2, false));
+
+    assert_eq!(decode(0x9F), (SHA, AbsY, 5, false));
+    assert_eq!(decode(0x93), (SHA, IndY, 6, false));
+
+    assert_eq!(decode(0x9B), (SHS, AbsY, 5, false));
+
+    assert_eq!(decode(0x9E), (SHX, AbsY, 5, false));
+
+    assert_eq!(decode(0x9C), (SHY, AbsY, 5, false));
+
+    assert_eq!(decode(0x0F), (SLO, Abs, 6, false));
+    assert_eq!(decode(0x1F), (SLO, AbsX, 7, false));
+    assert_eq!(decode(0x1B), (SLO, AbsY, 7, false));
+    assert_eq!(decode(0x07), (SLO, Zp, 5, false));
+    assert_eq!(decode(0x17), (SLO, Zpx, 6, false));
+    assert_eq!(decode(0x03), (SLO, IndX, 8, false));
+    assert_eq!(decode(0x13), (SLO, IndY, 8, false));
+
+    assert_eq!(decode(0x4F), (SRE, Abs, 6, false));
+    assert_eq!(decode(0x5F), (SRE, AbsX, 7, false));
+    assert_eq!(decode(0x5B), (SRE, AbsY, 7, false));
+    assert_eq!(decode(0x47), (SRE, Zp, 5, false));
+    assert_eq!(decode(0x57), (SRE, Zpx, 6, false));
+    assert_eq!(decode(0x43), (SRE, IndX, 8, false));
+    assert_eq!(decode(0x53), (SRE, IndY, 8, false));
+
+    assert_eq!(decode(0x8B), (XXA, Imm, 2, false));
 }

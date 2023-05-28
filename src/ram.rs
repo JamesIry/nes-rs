@@ -24,26 +24,30 @@ impl RAM {
     pub fn raw(&mut self) -> &mut Vec<u8> {
         &mut self.memory
     }
+
+    fn physical(&self, addr: u16) -> usize {
+        ((addr & self.addr_mask) - (self.start_addr & self.addr_mask)) as usize
+    }
 }
 
 impl BusDevice for RAM {
-    fn read(&self, addr: u16) -> Option<u8> {
+    fn read_from_cpu_bus(&mut self, addr: u16) -> Option<u8> {
         if addr >= self.start_addr && addr <= self.end_addr {
-            let target = addr & self.addr_mask;
-            let data = self.memory[(target - self.start_addr) as usize];
+            let data = self.memory[self.physical(addr)];
             Some(data)
         } else {
             None
         }
     }
 
-    fn write(&mut self, addr: u16, data: u8) -> bool {
+    fn write_to_cpu_bus(&mut self, addr: u16, data: u8) -> Option<u8> {
         if addr >= self.start_addr && addr <= self.end_addr {
-            let target = addr & self.addr_mask;
-            self.memory[(target - self.start_addr) as usize] = data;
-            true
+            let physical = self.physical(addr);
+            let old = self.memory[physical];
+            self.memory[physical] = data;
+            Some(old)
         } else {
-            false
+            None
         }
     }
 }
