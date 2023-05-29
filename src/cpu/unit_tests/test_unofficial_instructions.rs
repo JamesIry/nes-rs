@@ -7,7 +7,7 @@ use crate::cpu::*;
 
 #[test]
 fn test_load_store_unofficial() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
@@ -93,7 +93,7 @@ fn test_load_store_unofficial() {
 
 #[test]
 fn test_logic_unofficial() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.pc = 0;

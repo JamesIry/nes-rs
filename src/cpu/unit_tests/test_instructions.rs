@@ -99,7 +99,7 @@ fn test_flags() {
 
 #[test]
 fn test_increments() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
@@ -207,7 +207,7 @@ fn test_transfers() {
 
 #[test]
 fn test_load_store() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.status = 0;
@@ -309,7 +309,7 @@ fn test_load_store() {
 
 #[test]
 fn test_shift() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.set_flag(Flag::Carry, false);
@@ -405,7 +405,7 @@ fn test_shift() {
 
 #[test]
 fn test_logic() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0, 0x0F);
@@ -437,7 +437,7 @@ fn test_logic() {
 
 #[test]
 fn test_bit() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0, 0x01);
@@ -492,7 +492,7 @@ fn test_bit() {
 
 #[test]
 fn test_compare() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0, 0x42);
@@ -552,7 +552,7 @@ fn test_compare() {
 
 #[test]
 fn test_branch() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.status = 0;
@@ -705,7 +705,7 @@ fn test_branch() {
 
 #[test]
 fn test_stack() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.sp = 0xFF;
 
@@ -761,7 +761,7 @@ fn test_stack() {
 
 #[test]
 fn test_adc_binary() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.set_flag(Flag::Decimal, false);
 
@@ -824,7 +824,7 @@ fn test_adc_binary() {
 
 #[test]
 fn test_adc_decimal() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.set_flag(Flag::Decimal, true);
 
@@ -864,7 +864,7 @@ fn test_adc_decimal() {
 
 #[test]
 fn test_sbc_binary() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.set_flag(Flag::Decimal, false);
 
@@ -927,7 +927,7 @@ fn test_sbc_binary() {
 
 #[test]
 fn test_sbc_decimal() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.set_flag(Flag::Decimal, true);
 
@@ -978,7 +978,7 @@ fn test_sbc_decimal() {
 
 #[test]
 fn test_jmp() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.pc = 0;
@@ -1015,7 +1015,7 @@ fn test_jmp() {
 
 #[test]
 fn test_jsr_rts() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
@@ -1045,7 +1045,7 @@ fn test_jsr_rts() {
 
 #[test]
 fn test_brk_rti() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 

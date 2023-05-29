@@ -5,7 +5,7 @@ use instructions::Mode::*;
 
 #[test]
 fn test_read_modes() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 
@@ -87,7 +87,7 @@ fn test_read_modes() {
 
 #[test]
 fn test_write_modes() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
     cpu.status = 0;
 

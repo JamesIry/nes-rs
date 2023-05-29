@@ -2,7 +2,7 @@ use crate::cpu::*;
 
 #[test]
 fn test_reset() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0xFFFC, 0x34);
@@ -24,7 +24,7 @@ fn test_reset() {
 
 #[test]
 fn test_nmi() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0xFFFC, 0x34);
@@ -50,7 +50,7 @@ fn test_nmi() {
 
 #[test]
 fn test_irq() {
-    let (cpu, _mem, _bus) = Bus::configure_generic();
+    let (cpu, _mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     cpu.write_bus_byte(0xFFFC, 0x34);

@@ -1,16 +1,7 @@
-use std::{cell::RefCell, rc::Rc, rc::Weak};
+use std::{cell::RefCell, rc::Rc};
 
 #[cfg(test)]
 use crate::{cpu::CPU, ram::RAM};
-pub trait Processor {
-    fn clock(&mut self);
-    fn reset(&mut self);
-    fn nmi(&mut self);
-    fn irq(&mut self);
-    fn stuck(&self) -> bool;
-
-    fn set_bus(&mut self, bus: Weak<RefCell<Bus>>);
-}
 
 pub trait BusDevice {
     fn read(&mut self, addr: u16) -> Option<u8>;
@@ -18,19 +9,14 @@ pub trait BusDevice {
 }
 
 pub struct Bus {
-    processor: Rc<RefCell<dyn Processor>>,
     bus_devices: Vec<Rc<RefCell<dyn BusDevice>>>,
 }
 
 impl Bus {
-    pub fn new(processor: Rc<RefCell<dyn Processor>>) -> Rc<RefCell<Self>> {
-        let result = Rc::new(RefCell::new(Self {
-            processor: processor.clone(),
+    pub fn new() -> Self {
+        Self {
             bus_devices: Vec::new(),
-        }));
-        let weak = Rc::downgrade(&result);
-        processor.borrow_mut().set_bus(weak);
-        result
+        }
     }
 
     pub fn add_device(&mut self, device: Rc<RefCell<dyn BusDevice>>) {
@@ -55,34 +41,12 @@ impl Bus {
         0
     }
 
-    pub fn clock(&self) {
-        self.processor.borrow_mut().clock();
-    }
-
-    pub fn reset(&self) {
-        self.processor.borrow_mut().reset();
-    }
-
-    pub fn nmi(&self) {
-        self.processor.borrow_mut().nmi();
-    }
-
-    pub fn irq(&self) {
-        self.processor.borrow_mut().irq();
-    }
-
-    #[cfg(test)]
-    pub fn stuck(&self) -> bool {
-        self.processor.borrow().stuck()
-    }
-
     #[allow(clippy::type_complexity)]
     #[cfg(test)]
-    pub fn configure_generic() -> (Rc<RefCell<CPU>>, Rc<RefCell<RAM>>, Rc<RefCell<Bus>>) {
+    pub fn configure_generic() -> (Rc<RefCell<CPU>>, Rc<RefCell<RAM>>) {
         let cpu = Rc::new(RefCell::new(CPU::default()));
         let mem = Rc::new(RefCell::new(RAM::new(0x0000, 0xFFFF, 0xFFFF)));
-        let bus = Bus::new(cpu.clone());
-        bus.borrow_mut().add_device(mem.clone());
-        (cpu, mem, bus)
+        cpu.borrow_mut().add_device(mem.clone());
+        (cpu, mem)
     }
 }

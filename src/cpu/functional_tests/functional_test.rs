@@ -9,7 +9,7 @@ use super::super::*;
 
 #[test]
 fn functional_test() {
-    let (cpu, mem, _bus) = Bus::configure_generic();
+    let (cpu, mem) = Bus::configure_generic();
     let mut cpu = cpu.as_ref().borrow_mut();
 
     // load the bin file into ram
