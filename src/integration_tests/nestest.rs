@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crate::apu::APU;
 use crate::bus::Bus;
-use crate::cartridge::Cartridge;
+use crate::cartridge::{Cartridge, CartridgeCPUPort};
 use crate::cpu::decode::decode;
 use crate::cpu::flags::Flag;
 use crate::cpu::instructions::Instruction;
@@ -22,6 +22,10 @@ use anyhow::Result;
  */
 #[test]
 fn test() {
+    let cartridge = Rc::new(RefCell::new(
+        Cartridge::load("resources/test/nestest.nes").unwrap(),
+    ));
+
     let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
     let bus = Bus::new(cpu.clone());
 
@@ -42,9 +46,9 @@ fn test() {
         .borrow_mut()
         .add_device(Rc::new(RefCell::new(APU::new())));
     //0x4020 - 0xFFFF  Cartridge space
-    bus.as_ref().borrow_mut().add_device(Rc::new(RefCell::new(
-        Cartridge::load("resources/test/nestest.nes").unwrap(),
-    )));
+    bus.as_ref()
+        .borrow_mut()
+        .add_device(Rc::new(RefCell::new(CartridgeCPUPort::new(cartridge))));
 
     bus.as_ref().borrow_mut().irq(); // just calling to avoid unused warning for now
     bus.as_ref().borrow_mut().nmi(); // just calling to avoid unused warning for now

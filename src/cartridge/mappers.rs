@@ -1,10 +1,17 @@
 pub mod mapper0;
 pub trait Mapper {
     fn translate_cpu_addr(&mut self, addr: u16) -> CartridgeCpuLocation;
+    fn translate_ppu_addr(&mut self, addr: u16) -> CartridgePpuLocation;
 }
 pub enum CartridgeCpuLocation {
     None,
-    Ram(u16),
+    SRam(u16),
     Trainer(u16),
     PrgRom(u16),
+}
+
+pub enum CartridgePpuLocation {
+    None,
+    ChrRom(u16),
+    VRam(u16),
 }

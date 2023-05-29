@@ -11,7 +11,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use apu::APU;
 use bus::Bus;
-use cartridge::Cartridge;
+use cartridge::{Cartridge, CartridgeCPUPort, CartridgePPUPort};
 use cpu::{CPUType, CPU};
 use ppu::PPU;
 use ram::RAM;
@@ -21,36 +21,57 @@ mod integration_tests {
 }
 
 fn main() {
-    let bus = Bus::new(Rc::new(RefCell::new(CPU::new(CPUType::RP2A03))));
+    let cartridge = Rc::new(RefCell::new(
+        Cartridge::load("resources/test/nestest.nes").unwrap(),
+    ));
 
-    // 0x0000 - 0x1FFFF RAM
+    let cpu_bus = Bus::new(Rc::new(RefCell::new(CPU::new(CPUType::RP2A03))));
+
+    // 0x0000 - 0x1FFFF "work" RAM (WRAM)
     // NES ram is physically only 0x0000 - 0x07FF, but it's then "mirrored" 3 more
     // times to 0x1FFF. "Mirroring" can be accomplished by masking off some bits
-
-    bus.as_ref()
+    cpu_bus
+        .as_ref()
         .borrow_mut()
         .add_device(Rc::new(RefCell::new(RAM::new(0x0000, 0x1FFF, 0x07FF))));
     //0x2000 - 0x3FFF  PPU Registers from 0x2000 to 0x2007 and then mirrored with mask 0x0007
-    bus.as_ref()
-        .borrow_mut()
-        .add_device(Rc::new(RefCell::new(PPU::new())));
+    let ppu = Rc::new(RefCell::new(PPU::new()));
+    cpu_bus.as_ref().borrow_mut().add_device(ppu.clone());
     //0x4000 - 0x4017  APU and IO registers
     //0x4018 - 0x401F  APU and IO functionality that is disabled
-    bus.as_ref()
+    cpu_bus
+        .as_ref()
         .borrow_mut()
         .add_device(Rc::new(RefCell::new(APU::new())));
     //0x4020 - 0xFFFF  Cartridge space
-    bus.as_ref().borrow_mut().add_device(Rc::new(RefCell::new(
-        Cartridge::load("resources/test/nestest.nes").unwrap(),
-    )));
+    cpu_bus
+        .as_ref()
+        .borrow_mut()
+        .add_device(Rc::new(RefCell::new(CartridgeCPUPort::new(
+            cartridge.clone(),
+        ))));
 
-    bus.as_ref().borrow_mut().irq(); // just calling to avoid unused warning for now
-    bus.as_ref().borrow_mut().nmi(); // just calling to avoid unused warning for now
+    let ppu_bus = Bus::new(ppu);
+    ppu_bus
+        .as_ref()
+        .borrow_mut()
+        .add_device(Rc::new(RefCell::new(CartridgePPUPort::new(cartridge))));
 
-    bus.as_ref().borrow_mut().reset();
+    cpu_bus.as_ref().borrow_mut().irq(); // just calling to avoid unused warning for now
+    cpu_bus.as_ref().borrow_mut().nmi(); // just calling to avoid unused warning for now
 
-    // now loop until trapped or halted
-    while !bus.borrow().stuck() {
-        bus.borrow().clock();
+    cpu_bus.as_ref().borrow_mut().reset();
+
+    let mut t = 0;
+    loop {
+        if t == 0 {
+            cpu_bus.borrow().clock();
+        }
+        ppu_bus.borrow().clock();
+
+        t += 1;
+        if t == 3 {
+            t = 0;
+        }
     }
 }

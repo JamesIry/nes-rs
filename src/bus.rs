@@ -71,6 +71,7 @@ impl Bus {
         self.processor.borrow_mut().irq();
     }
 
+    #[cfg(test)]
     pub fn stuck(&self) -> bool {
         self.processor.borrow().stuck()
     }
