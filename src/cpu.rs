@@ -45,6 +45,7 @@ pub struct CPU {
     pub sp: u8,
     pub pc: u16,
     pub cycles: usize,
+    rdy: bool,
     jammed: bool,
     trapped: bool,
     // internal state of executing instuciton
@@ -83,6 +84,7 @@ impl CPU {
             cycle_on_page_boundary: false,
             interrupt: None,
             cycles: 0,
+            rdy: true,
             monitor: Box::new(NulMonitor {}),
             bus: Bus::new(),
         }
@@ -144,7 +146,7 @@ impl CPU {
     }
 
     pub fn clock(&mut self) {
-        if self.jammed {
+        if self.jammed || !self.rdy {
             return;
         }
 
@@ -203,6 +205,20 @@ impl CPU {
 
     pub fn add_device(&mut self, device: Rc<RefCell<dyn BusDevice>>) {
         self.bus.add_device(device);
+    }
+
+    pub fn set_rdy(&mut self, rdy: bool) {
+        self.rdy = rdy;
+    }
+
+    #[cfg(test)]
+    pub fn is_rdy(&self) -> bool {
+        self.rdy
+    }
+
+    #[cfg(test)]
+    pub fn cycles(&self) -> usize {
+        self.cycles
     }
 
     fn interrupt(&mut self, interrupt: Interrupt) -> (PageBoundary, Branch) {
@@ -1159,4 +1175,14 @@ enum Interrupt {
     IRQ,
     NMI,
     RST,
+}
+
+#[cfg(test)]
+pub fn create_test_configuration() -> (CPU, Rc<RefCell<crate::ram::RAM>>) {
+    use crate::ram::RAM;
+
+    let mut cpu = CPU::default();
+    let mem = Rc::new(RefCell::new(RAM::new(0x0000, 0xFFFF, 0xFFFF)));
+    cpu.add_device(mem.clone());
+    (cpu, mem)
 }

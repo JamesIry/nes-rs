@@ -1,6 +1,5 @@
 #![allow(clippy::field_reassign_with_default)]
 
-use crate::bus::Bus;
 use crate::cpu::flags::*;
 use crate::cpu::instructions::Instruction::*;
 use crate::cpu::instructions::Mode::*;
@@ -99,8 +98,7 @@ fn test_flags() {
 
 #[test]
 fn test_increments() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
     cpu.status = 0;
 
     cpu.x = 0x44;
@@ -207,8 +205,7 @@ fn test_transfers() {
 
 #[test]
 fn test_load_store() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
     cpu.status = 0;
 
@@ -309,8 +306,7 @@ fn test_load_store() {
 
 #[test]
 fn test_shift() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
     cpu.set_flag(Flag::Carry, false);
     cpu.a = 0x42;
@@ -405,8 +401,7 @@ fn test_shift() {
 
 #[test]
 fn test_logic() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
     cpu.write_bus_byte(0, 0x0F);
 
@@ -437,8 +432,7 @@ fn test_logic() {
 
 #[test]
 fn test_bit() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
     cpu.write_bus_byte(0, 0x01);
     cpu.write_bus_byte(1, 0b11000000);
@@ -492,8 +486,7 @@ fn test_bit() {
 
 #[test]
 fn test_compare() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
     cpu.write_bus_byte(0, 0x42);
 
@@ -552,8 +545,7 @@ fn test_compare() {
 
 #[test]
 fn test_branch() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
     cpu.status = 0;
 
@@ -705,8 +697,7 @@ fn test_branch() {
 
 #[test]
 fn test_stack() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
     cpu.sp = 0xFF;
 
     cpu.a = 0x42;
@@ -761,8 +752,7 @@ fn test_stack() {
 
 #[test]
 fn test_adc_binary() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
     cpu.set_flag(Flag::Decimal, false);
 
     cpu.set_flag(Flag::Carry, false);
@@ -824,8 +814,7 @@ fn test_adc_binary() {
 
 #[test]
 fn test_adc_decimal() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
     cpu.set_flag(Flag::Decimal, true);
 
     cpu.set_flag(Flag::Carry, false);
@@ -864,8 +853,7 @@ fn test_adc_decimal() {
 
 #[test]
 fn test_sbc_binary() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
     cpu.set_flag(Flag::Decimal, false);
 
     cpu.set_flag(Flag::Carry, true);
@@ -927,8 +915,7 @@ fn test_sbc_binary() {
 
 #[test]
 fn test_sbc_decimal() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
     cpu.set_flag(Flag::Decimal, true);
 
     cpu.set_flag(Flag::Carry, true);
@@ -978,8 +965,7 @@ fn test_sbc_decimal() {
 
 #[test]
 fn test_jmp() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x34);
@@ -1015,8 +1001,7 @@ fn test_jmp() {
 
 #[test]
 fn test_jsr_rts() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
     cpu.status = 0;
 
     cpu.sp = 0xFF;
@@ -1045,8 +1030,7 @@ fn test_jsr_rts() {
 
 #[test]
 fn test_brk_rti() {
-    let (cpu, _mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, _mem) = crate::cpu::create_test_configuration();
     cpu.status = 0;
 
     cpu.sp = 0xFF;

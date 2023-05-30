@@ -1,8 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
 
-#[cfg(test)]
-use crate::{cpu::CPU, ram::RAM};
-
 pub trait BusDevice {
     fn read(&mut self, addr: u16) -> Option<u8>;
     fn write(&mut self, addr: u16, data: u8) -> Option<u8>;
@@ -39,14 +36,5 @@ impl Bus {
             }
         }
         0
-    }
-
-    #[allow(clippy::type_complexity)]
-    #[cfg(test)]
-    pub fn configure_generic() -> (Rc<RefCell<CPU>>, Rc<RefCell<RAM>>) {
-        let cpu = Rc::new(RefCell::new(CPU::default()));
-        let mem = Rc::new(RefCell::new(RAM::new(0x0000, 0xFFFF, 0xFFFF)));
-        cpu.borrow_mut().add_device(mem.clone());
-        (cpu, mem)
     }
 }

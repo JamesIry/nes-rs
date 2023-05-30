@@ -5,12 +5,9 @@ use std::{
     io::{BufReader, Read},
 };
 
-use super::super::*;
-
 #[test]
 fn functional_test() {
-    let (cpu, mem) = Bus::configure_generic();
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let (mut cpu, mem) = crate::cpu::create_test_configuration();
 
     // load the bin file into ram
     let file = File::open("resources/test/6502_functional_test.bin").unwrap();
