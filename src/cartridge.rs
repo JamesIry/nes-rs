@@ -28,8 +28,6 @@ pub struct Cartridge {
     prg_rom_mask: u16,
     chr_rom: Vec<u8>,
     chr_rom_mask: u16,
-    #[allow(dead_code)]
-    screen_mirroring: MirrorType,
     mapper: Box<dyn Mapper>,
     vram: Vec<u8>,
 }
@@ -41,7 +39,7 @@ static CHR_ROM_PAGE_SIZE: usize = 0x2000;
 static MAX_PRG_ROM_ADDRESSIBLE: usize = 0x8000;
 static MAX_CHR_ROM_ADDRESSIBLE: usize = 0x4000;
 static MAX_SRAM_ADDRESSIBLE: usize = 0x2000;
-static VRAM_SIZE: usize = 0x2000;
+static VRAM_SIZE: usize = 0x0800;
 
 impl Cartridge {
     pub fn load(file_name: &str) -> Result<Self> {
@@ -74,7 +72,7 @@ impl Cartridge {
 
         let mapper_number = (header[7] & 0xF0) | (header[6] >> 4);
         let mapper = Box::new(match mapper_number {
-            0 => Mapper0::new(),
+            0 => Mapper0::new(screen_mirroring),
             _ => Err(CartridgeError::UnsupportedMapper(mapper_number))?,
         });
 
@@ -120,7 +118,6 @@ impl Cartridge {
             prg_rom_mask,
             chr_rom,
             chr_rom_mask,
-            screen_mirroring,
             mapper,
             vram,
         })
