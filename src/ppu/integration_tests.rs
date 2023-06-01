@@ -7,6 +7,7 @@ use crate::{
     bus::BusDevice,
     cartridge::{Cartridge, CartridgeCPUPort},
     cpu::{CPUType, CPU},
+    ppu::nul_renderer,
     ram::RAM,
 };
 
@@ -17,7 +18,7 @@ fn test_dma() {
     ));
 
     let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
-    let ppu = Rc::new(RefCell::new(PPU::new()));
+    let ppu = Rc::new(RefCell::new(PPU::new(nul_renderer)));
     let ram = Rc::new(RefCell::new(RAM::new(0x0000, 0x1FFF, 0x07FF)));
     let apu = Rc::new(RefCell::new(APU::new(cpu.clone())));
     cpu.as_ref().borrow_mut().add_device(ram.clone());

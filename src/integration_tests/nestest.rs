@@ -12,7 +12,7 @@ use crate::cpu::flags::Flag;
 use crate::cpu::instructions::Instruction;
 use crate::cpu::monitor::Monitor;
 use crate::cpu::{CPUType, CPU};
-use crate::ppu::PPU;
+use crate::ppu::{nul_renderer, PPU};
 use crate::ram::RAM;
 use anyhow::Result;
 
@@ -26,7 +26,7 @@ fn test() {
     ));
 
     let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
-    let ppu = Rc::new(RefCell::new(PPU::new()));
+    let ppu = Rc::new(RefCell::new(PPU::new(nul_renderer)));
 
     // 0x0000 - 0x1FFFF RAM
     // NES ram is physically only 0x0000 - 0x07FF, but it's then "mirrored" 3 more

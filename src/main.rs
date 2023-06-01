@@ -12,7 +12,7 @@ use std::{cell::RefCell, rc::Rc};
 use apu::APU;
 use cartridge::{Cartridge, CartridgeCPUPort, CartridgePPUPort};
 use cpu::{CPUType, CPU};
-use ppu::PPU;
+use ppu::{PPU, nul_renderer};
 use ram::RAM;
 #[cfg(test)]
 mod integration_tests {
@@ -25,7 +25,7 @@ fn main() {
     ));
 
     let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
-    let ppu = Rc::new(RefCell::new(PPU::new()));
+    let ppu = Rc::new(RefCell::new(PPU::new(nul_renderer)));
     let apu = Rc::new(RefCell::new(APU::new(cpu.clone())));
 
     // 0x0000 - 0x1FFFF "work" RAM (WRAM)

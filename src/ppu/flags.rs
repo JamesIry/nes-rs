@@ -7,8 +7,8 @@ use std::ops::Not;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum CtrlFlag {
-    BaseNameTable1 = 0b00000001,
-    BaseNameTable2 = 0b00000010,
+    BaseNameTableLow = 0b00000001,
+    BaseNameTableHigh = 0b00000010,
     IncrementAcross = 0b00000100,
     SpriteTableHigh = 0b00001000,
     BackgroundPatternHigh = 0b00010000,
