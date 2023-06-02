@@ -6,40 +6,43 @@ use crate::ppu::PPU;
 fn test_ctrl_register() {
     let (mut ppu, _mem) = crate::ppu::create_test_configuration();
 
-    assert_eq!(0, ppu.get_ppu_ctrl());
+    assert_eq!(0, ppu.get_ctrl_flags());
 
     ppu.write(
         0x2000,
         CtrlFlag::IncrementAcross | CtrlFlag::SpriteSizeLarge,
     );
 
-    assert_eq!(0, ppu.temporary_vram_address);
+    assert_eq!(0, ppu.temporary_vram_address.register);
 
     assert_eq!(
         CtrlFlag::IncrementAcross | CtrlFlag::SpriteSizeLarge,
-        ppu.get_ppu_ctrl()
+        ppu.get_ctrl_flags()
     );
 
     ppu.write(0x2000, 0 | CtrlFlag::BaseNameTableHigh);
 
-    assert_eq!(0b0000100000000000, ppu.temporary_vram_address);
+    assert_eq!(0b0000100000000000, ppu.temporary_vram_address.register);
 
     ppu.write(0x2000, 0 | CtrlFlag::BaseNameTableLow);
 
-    assert_eq!(0b0000010000000000, ppu.temporary_vram_address);
-    assert_eq!(0, ppu.vram_address);
+    assert_eq!(0b0000010000000000, ppu.temporary_vram_address.register);
+    assert_eq!(0, ppu.vram_address.register);
 }
 
 #[test]
 fn test_mask_register() {
     let (mut ppu, _mem) = crate::ppu::create_test_configuration();
 
-    assert_eq!(0, ppu.ppu_mask);
+    assert_eq!(0, ppu.mask_register);
 
     ppu.write(0x2001, MaskFlag::EmphasizeBlue | MaskFlag::ShowBG);
 
-    assert_eq!(MaskFlag::EmphasizeBlue | MaskFlag::ShowBG, ppu.ppu_mask);
-    assert_eq!(0, ppu.vram_address);
+    assert_eq!(
+        MaskFlag::EmphasizeBlue | MaskFlag::ShowBG,
+        ppu.mask_register
+    );
+    assert_eq!(0, ppu.vram_address.register);
 }
 
 #[test]
@@ -60,7 +63,7 @@ fn test_status_regiter() {
     assert_eq!(Some(0 | StatusFlag::Sprite0Hit), ppu.read(0x2002));
 
     check_read_from_write(&mut ppu, 0 | StatusFlag::Sprite0Hit);
-    assert_eq!(0, ppu.vram_address);
+    assert_eq!(0, ppu.vram_address.register);
 }
 
 #[cfg(test)]
@@ -96,24 +99,24 @@ fn test_oam_registers() {
     assert_eq!(Some(0x34), ppu.read(0x2004));
 
     check_read_from_write(&mut ppu, 0x34);
-    assert_eq!(0, ppu.vram_address);
+    assert_eq!(0, ppu.vram_address.register);
 }
 
 #[test]
 fn test_scroll_registers() {
     let (mut ppu, _mem) = crate::ppu::create_test_configuration();
 
-    assert_eq!(0, ppu.get_scroll_x());
-    assert_eq!(0, ppu.get_scroll_y());
+    assert_eq!(0, ppu.temporary_vram_address.get_x());
+    assert_eq!(0, ppu.temporary_vram_address.get_y());
 
     ppu.write(0x2005, 0x42);
-    assert_eq!(0b0000000000001000, ppu.temporary_vram_address);
-    assert_eq!(0b00000010, ppu.fine_x);
+    assert_eq!(0b0000000000001000, ppu.temporary_vram_address.register);
+    assert_eq!(0b00000010, ppu.temporary_vram_address.fine_x);
     ppu.write(0x2005, 0x34);
-    assert_eq!(0b0100000011001000, ppu.temporary_vram_address);
+    assert_eq!(0b0100000011001000, ppu.temporary_vram_address.register);
 
-    assert_eq!(0x42, ppu.get_scroll_x());
-    assert_eq!(0x34, ppu.get_scroll_y());
+    assert_eq!(0x42, ppu.temporary_vram_address.get_x());
+    assert_eq!(0x34, ppu.temporary_vram_address.get_y());
 
     // should reset the latch
     ppu.read(0x2002);
@@ -122,10 +125,10 @@ fn test_scroll_registers() {
     ppu.write(0x2005, 0x45);
     ppu.write(0x2005, 0x67);
 
-    assert_eq!(0x45, ppu.get_scroll_x());
-    assert_eq!(0x67, ppu.get_scroll_y());
+    assert_eq!(0x45, ppu.temporary_vram_address.get_x());
+    assert_eq!(0x67, ppu.temporary_vram_address.get_y());
 
-    assert_eq!(0, ppu.vram_address);
+    assert_eq!(0, ppu.vram_address.register);
 }
 
 #[test]
@@ -139,12 +142,12 @@ fn test_data_registers_small_stride() {
 
     ppu.write(0x2006, 0x12);
 
-    assert_eq!(0x1200, ppu.temporary_vram_address);
-    assert_eq!(0, ppu.vram_address);
+    assert_eq!(0x1200, ppu.temporary_vram_address.register);
+    assert_eq!(0, ppu.vram_address.register);
 
     ppu.write(0x2006, 0x34);
-    assert_eq!(0x1234, ppu.temporary_vram_address);
-    assert_eq!(0x1234, ppu.vram_address);
+    assert_eq!(0x1234, ppu.temporary_vram_address.register);
+    assert_eq!(0x1234, ppu.vram_address.register);
 
     ppu.write(0x2007, 0x42);
     assert!(!ppu.clock());
@@ -211,31 +214,31 @@ fn test_automatic_status() {
 
     ppu.set_ctrl_flag(CtrlFlag::NmiEnabled, true);
 
-    ppu.ppu_status =
+    ppu.status_register =
         StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow | StatusFlag::Sprite0Hit;
     assert!(!ppu.clock());
     assert_eq!(
         StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow | StatusFlag::Sprite0Hit,
-        ppu.ppu_status
+        ppu.status_register
     );
     assert!(!ppu.clock());
-    assert_eq!(0, ppu.ppu_status);
+    assert_eq!(0, ppu.status_register);
 
     ppu.scan_line = 241;
     ppu.tick = 0;
     assert!(!ppu.clock());
-    assert_eq!(0, ppu.ppu_status);
+    assert_eq!(0, ppu.status_register);
     assert!(ppu.clock()); // nmi should happen here
     assert!(ppu.read_status_flag(StatusFlag::VerticalBlank));
     assert_eq!(Some(StatusFlag::VerticalBlank | 0), ppu.read(0x2002)); // should clear VB flag
     assert_eq!(Some(0), ppu.read(0x2002));
 
     ppu.set_ctrl_flag(CtrlFlag::NmiEnabled, false);
-    ppu.ppu_status = 0;
+    ppu.status_register = 0;
     ppu.scan_line = 241;
     ppu.tick = 0;
     assert!(!ppu.clock());
-    assert_eq!(0, ppu.ppu_status);
+    assert_eq!(0, ppu.status_register);
     assert!(!ppu.clock()); // nmi should not happen here because disabled
-    assert_eq!(StatusFlag::VerticalBlank | 0, ppu.ppu_status);
+    assert_eq!(StatusFlag::VerticalBlank | 0, ppu.status_register);
 }
