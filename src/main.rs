@@ -50,9 +50,8 @@ fn main() {
         .borrow_mut()
         .add_device(Rc::new(RefCell::new(CartridgePPUPort::new(cartridge))));
 
-    cpu.as_ref().borrow_mut().irq(); // just calling to avoid unused warning for now
-
     cpu.as_ref().borrow_mut().reset();
+    ppu.as_ref().borrow_mut().reset();
 
     let mut t = 0;
     loop {

@@ -138,6 +138,7 @@ impl CPU {
         self.trapped = false;
     }
 
+    #[allow(unused)]
     pub fn irq(&mut self) {
         if self.interrupt.is_none() && !self.read_flag(Flag::InterruptDisable) {
             self.interrupt = Some(Interrupt::IRQ);

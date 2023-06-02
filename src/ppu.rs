@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod flags;
 mod rgb;
 
@@ -365,6 +363,7 @@ impl PPU {
         old
     }
 
+    #[cfg(test)]
     fn set_ctrl_flag(&mut self, flag: CtrlFlag, value: bool) {
         if value {
             self.set_ctrl_flags(self.get_ctrl_flags() | flag);
@@ -377,6 +376,7 @@ impl PPU {
         (self.get_ctrl_flags() & flag) != 0
     }
 
+    #[cfg(test)]
     fn set_mask_flag(&mut self, flag: MaskFlag, value: bool) {
         if value {
             self.mask_register |= flag;
