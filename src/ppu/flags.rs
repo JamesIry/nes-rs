@@ -21,8 +21,8 @@ pub enum CtrlFlag {
 #[repr(u8)]
 pub enum MaskFlag {
     Greyscale = 0b00000001,
-    Left8BG = 0b00000010,
-    Left8Sprites = 0b00000100,
+    ShowLeft8BG = 0b00000010,
+    ShowLeft8Sprites = 0b00000100,
     ShowBG = 0b00001000,
     ShowSprites = 0b00010000,
     EmphasizeRed = 0b00100000,

@@ -12,7 +12,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::bus::{Bus, BusDevice};
 
-use self::flags::{CtrlFlag, MaskFlag, StatusFlag};
+use self::{
+    flags::{CtrlFlag, MaskFlag, StatusFlag},
+    rgb::translate_nes_to_rgb,
+};
 
 const CPU_ADDR_START: u16 = 0x2000;
 const CPU_ADDR_END: u16 = 0x3FFF;
@@ -29,8 +32,7 @@ pub struct PPU {
     mask_register: u8,
     status_register: u8,
     oam_addr: u8,
-    data_buffer: u8,
-    last_read_buffer: u8,
+
     bus: Bus,
     oam_table: [u8; OAM_SIZE],
     pallettes: [u8; PALETTE_SIZE],
@@ -43,6 +45,12 @@ pub struct PPU {
     write_toggle: bool,
     vram_address: VramAddress,
     temporary_vram_address: VramAddress,
+
+    pattern_data: BGShiftRegisterPair,
+    attribute_data: BGShiftRegister,
+    name_table_data: BGShiftRegister,
+    bus_request: BusRequest,
+    data_buffer: u8,
 }
 
 pub fn nul_renderer(_x: u16, _y: u16, _rgb: (u8, u8, u8)) {}
@@ -57,8 +65,6 @@ impl PPU {
             mask_register: 0,
             status_register: 0,
             oam_addr: 0,
-            data_buffer: 0,
-            last_read_buffer: 0,
             pallettes: [0; PALETTE_SIZE],
             scan_line: -1,
             tick: 0,
@@ -68,68 +74,30 @@ impl PPU {
             temporary_vram_address: VramAddress::new(),
             write_toggle: false,
 
+            pattern_data: BGShiftRegisterPair::new(),
+            attribute_data: BGShiftRegister::new(),
+            name_table_data: BGShiftRegister::new(),
+
+            data_buffer: 0,
+            bus_request: BusRequest::None,
         }
     }
 
     #[must_use]
     pub fn clock(&mut self) -> bool {
-        // manage status
-        match (self.scan_line, self.tick) {
-            (-1, 1) => {
-                self.status_register = 0; // clear StatusFlag::VerticalBlank, StatusFlag::Sprite0Hit, and StatusFlag::SpriteOverflow
-            }
-            (241, 1) => {
-                self.set_status_flag(StatusFlag::VerticalBlank, true); 
-                if self.read_ctrl_flag(CtrlFlag::NmiEnabled) {
-                    self.nmi_requested = true;
-                }
-            },
-            _ => (),
-        }
-
-        #[allow(clippy::manual_range_contains)]
+        self.manage_bus_request();
+        self.manage_status();
         if self.rendering_enabled() && self.scan_line < 240 {
-            self.render();
-    
-
-            println!("tick {}, scan {}, scroll_x {}, scroll_y {}", self.tick, self.scan_line, self.vram_address.get_x(), self.vram_address.get_y());
-
-            // manage scrolling
-            match (self.scan_line, self.tick) {
-                (_, t) if 1<= t && t < 256 && t % 8 == 0 => self.vram_address.increment_coarse_x(),
-                (_, 256) => {
-                    self.vram_address.increment_coarse_x();
-                    self.vram_address.increment_y()
-                }
-                (_, 257) => self.vram_address.copy_x_from(&self.temporary_vram_address),
-                (-1, t) if 280 <= t && t <= 304 => self.vram_address.copy_y_from(&self.temporary_vram_address),
-                (_, 328) => self.vram_address.increment_coarse_x(),
-                (_, 336) => self.vram_address.increment_coarse_x(),
-                _ => (),
+            self.manage_shift_registers();
+            if let Some((x, y, color)) = self.manage_render() {
+                let rgb = translate_nes_to_rgb(color);
+                let f = self.renderer;
+                f(x, y, rgb);
             }
+            self.manage_scrolling();
         }
-
-        // skip a tick on odd frames when rendering is enabled
-        if self.scan_line == -1 && self.tick == 339 && !self.even_frame && self.rendering_enabled()
-        {
-            self.tick = 340;
-        }
-        self.tick += 1;
-        if self.tick == 341 {
-            self.tick = 0;
-            self.scan_line += 1;
-            if self.scan_line == 261 {
-                self.scan_line = -1;
-                self.even_frame = !self.even_frame;
-            }
-        }
-
-        if self.nmi_requested {
-            self.nmi_requested = false;
-            self.read_ctrl_flag(CtrlFlag::NmiEnabled)
-        } else {
-            false
-        }
+        self.manage_tick();
+        self.manage_nmi()
     }
 
     fn rendering_enabled(&self) -> bool {
@@ -152,13 +120,76 @@ impl PPU {
         self.write_toggle = false;
         self.vram_address = VramAddress::new();
         self.temporary_vram_address = VramAddress::new();
+        self.pattern_data = BGShiftRegisterPair::new();
+        self.attribute_data = BGShiftRegister::new();
+        self.name_table_data = BGShiftRegister::new();
+
+        self.bus_request = BusRequest::None;
     }
 
-    fn render(&mut self) {
-        let x = self.tick;
-        let y = self.scan_line as u16;
-        
-        // shift registers
+    fn manage_bus_request(&mut self) {
+        match self.bus_request {
+            BusRequest::Read(addr) => {
+                self.data_buffer = self.bus.read(addr);
+                self.bus_request = BusRequest::None;
+            }
+            BusRequest::Write(addr, data) => {
+                println!("Writing to bus {:04X} {:02X}", addr, data);
+                self.data_buffer = data;
+                self.bus.write(addr, data);
+                self.bus_request = BusRequest::None;
+            }
+            BusRequest::None => (),
+        }
+    }
+
+    fn manage_status(&mut self) {
+        // manage status
+        match (self.scan_line, self.tick) {
+            (-1, 1) => {
+                self.status_register = 0; // clear StatusFlag::VerticalBlank, StatusFlag::Sprite0Hit, and StatusFlag::SpriteOverflow
+            }
+            (241, 1) => {
+                self.set_status_flag(StatusFlag::VerticalBlank, true);
+                if self.read_ctrl_flag(CtrlFlag::NmiEnabled) {
+                    self.nmi_requested = true;
+                }
+            }
+            _ => (),
+        }
+    }
+
+    #[allow(clippy::manual_range_contains)]
+    fn manage_scrolling(&mut self) {
+        println!(
+            "tick {}, scan {}, scroll_x {}, scroll_y {}",
+            self.tick,
+            self.scan_line,
+            self.vram_address.get_x(),
+            self.vram_address.get_y()
+        );
+
+        // manage scrolling
+        match (self.scan_line, self.tick) {
+            (_, t) if 1 <= t && t < 256 && t % 8 == 0 => self.vram_address.increment_coarse_x(),
+            (_, 256) => {
+                self.vram_address.increment_coarse_x();
+                self.vram_address.increment_y()
+            }
+            (_, 257) => self.vram_address.copy_x_from(&self.temporary_vram_address),
+            (-1, t) if 280 <= t && t <= 304 => {
+                self.vram_address.copy_y_from(&self.temporary_vram_address)
+            }
+            (_, 328) => self.vram_address.increment_coarse_x(),
+            (_, 336) => self.vram_address.increment_coarse_x(),
+            _ => (),
+        }
+    }
+
+    fn manage_shift_registers(&mut self) {
+        let name_table_address = self.vram_address.get_nametable_address();
+        let attribute_address = self.vram_address.get_attribute_address();
+
         /*
          7654 3210
          |||| ||++- 1-0: pallette number for top left quadrant of this meta tile
@@ -166,72 +197,89 @@ impl PPU {
          ||++------ 5-4: pallette number for bottom left quadrant of this meta tile
          ++-------- 7-6: pallette number for bottom right quadrant of this meta tile
         */
-        let mut attribute_entry = 0;
+        // attribute_data;
 
         /*
          RRRR CCCC
          |||| ++++-------- tile column in pattern table
          ++++------------- tile row in pattern table
         */
-        let mut nametable_entry = 0;
-
-        /* low bits of pointers into pallet entry, 1 bit per pixel */
-        let mut pattern_low_entry = 0;
-
-        /* high bits of pointers into pallet entry, 1 bit per pixel */
-        let mut pattern_high_entry = 0;
-
-        // end of shift registers
-
-        let nametable_address = self.vram_address.get_nametable_address();
-
-        let attribute_address = self.vram_address.get_attribute_address();
+        // nametable_data;
 
         /*
-         000 H RRRR CCCC P YYY
-         ||| | |||| |||| | +++- Y: Fine Y offset, the row number within a tile
-         ||| | |||| |||| +----- P: Bit plane (0: lower, 1: upper) (0 for reading bg low, 1 for reading bg high)
-         ||| | |||| ++++------- C: Tile column (lower nibble of nametable_entry)
-         ||| | ++++------------ R: Tile row (upper nibble of nametable_entry)
-         ||| +----------------- H: Half of pattern table (0: left, 1: right) = CtrlFlag::BackgroundPatternHigh
-         +++------------------- 0: Pattern table is 0x0000 - 0x01FFFF
-         */
-        let pattern_address: u16 = if self.read_ctrl_flag(CtrlFlag::BackgroundPatternHigh) {0x1000} else {0x0000} |
-        ((nametable_entry as u16) << 4) |
-        (self.vram_address.get_fine_y() as u16);
-
+        000 H RRRR CCCC P YYY
+        ||| | |||| |||| | +++- Y: Fine Y offset, the row number within a tile
+        ||| | |||| |||| +----- P: Bit plane (0: lower, 1: upper) (0 for reading bg low, 1 for reading bg high)
+        ||| | |||| ++++------- C: Tile column (lower nibble of nametable_entry)
+        ||| | ++++------------ R: Tile row (upper nibble of nametable_entry)
+        ||| +----------------- H: Half of pattern table (0: left, 1: right) = CtrlFlag::BackgroundPatternHigh
+        +++------------------- 0: Pattern table is 0x0000 - 0x01FFFF
+        */
+        let pattern_address: u16 = if self.read_ctrl_flag(CtrlFlag::BackgroundPatternHigh) {
+            0x1000
+        } else {
+            0x0000
+        } | ((self.name_table_data.current_byte() as u16) << 4)
+            | (self.vram_address.get_fine_y() as u16);
 
         if self.tick > 0 {
             match self.tick % 8 {
-                0 if self.tick < 261 || self.tick > 320 => pattern_high_entry = self.read_ppu_bus(pattern_address | 0b00001000),
-                1 if self.tick > 8 => (/* reload shifters */),
-                2 => nametable_entry = self.read_ppu_bus(nametable_address),
-                3 => (),
-                4 if self.tick != 340  => attribute_entry = self.read_ppu_bus(attribute_address),
-                4 if self.tick == 340  => nametable_entry = self.read_ppu_bus(nametable_address),
-                5 => (),
-                6 if self.tick < 261 || self.tick > 320  => pattern_low_entry = self.read_ppu_bus(pattern_address),
-                7 => (),
-                _ => (), 
-            } 
+                1 => {
+                    self.bus_request = BusRequest::Read(name_table_address);
+                    if self.tick > 8 {
+                        self.attribute_data.shift();
+                        self.pattern_data.shift();
+                        self.name_table_data.shift();
+                    }
+                }
+                2 => self.name_table_data.load(self.data_buffer),
+
+                3 if self.tick != 340 => self.bus_request = BusRequest::Read(attribute_address),
+                4 if self.tick != 340 => self.attribute_data.load(self.data_buffer),
+
+                3 if self.tick == 340 => self.bus_request = BusRequest::Read(name_table_address),
+                4 if self.tick == 340 => self.name_table_data.load(self.data_buffer),
+
+                5 if self.tick < 261 || self.tick > 320 => {
+                    self.bus_request = BusRequest::Read(pattern_address)
+                }
+                6 if self.tick < 261 || self.tick > 320 => {
+                    self.pattern_data.load_low(self.data_buffer)
+                }
+
+                7 if self.tick < 261 || self.tick > 320 => {
+                    self.bus_request = BusRequest::Read(pattern_address | 0b00001000)
+                }
+                0 if self.tick < 261 || self.tick > 320 => {
+                    self.pattern_data.load_high(self.data_buffer)
+                }
+
+                _ => (),
+            }
         }
+    }
+
+    fn manage_render(&mut self) -> Option<(u16, u16, u8)> {
+        let x = self.tick;
+        let y = self.scan_line as u16;
 
         if x < 256 && y < 240 {
+            let attribute_entry = self.attribute_data.current_byte();
+
             let meta_tile_row = y >> 6; // y / 64
             let meta_tile_column = x >> 6; // x / 64
-            let  pallette_number = match (meta_tile_column & 0b1, meta_tile_row & 0b1) {
-                (0,0) => attribute_entry,
-                (1,0) => attribute_entry >> 2,
-                (0,1) => attribute_entry >> 4,
-                (1,1) => attribute_entry >> 6,
-                (_,_) => unreachable!("got invalid pallette quadrant"),
-            } & 0b11;
+            let pallette_number = (attribute_entry
+                >> match (meta_tile_column & 0b1, meta_tile_row & 0b1) {
+                    (0, 0) => 0,
+                    (1, 0) => 2,
+                    (0, 1) => 4,
+                    (1, 1) => 6,
+                    (_, _) => unreachable!("got invalid pallette quadrant"),
+                })
+                & 0b11;
 
-            let bit_rotation = 7 - self.temporary_vram_address.fine_x as u32;
-            let bit_selection = 1 << bit_rotation;
-            // weird rotate right because sometimes we need to shift the high bit left 1
-            let pixel_number = (pattern_high_entry & bit_selection).rotate_right(7 + bit_rotation) | ((pattern_low_entry & bit_selection) >> bit_rotation);
-            
+            let x_offset = self.temporary_vram_address.fine_x + ((x.wrapping_sub(1) % 8) as u8);
+            let pixel_color_number = self.pattern_data.bits(x_offset);
 
             /*
             00111111 xxx S PP CC
@@ -242,23 +290,69 @@ impl PPU {
             |||||||| +++--------- doesn't matter, effectively set to 0 for mirroring
             ++++++++------------- 0x3F00 - 0x3FFF
             */
-            let pallette_address = 0x3F00 | (pallette_number << 2) as u16 | pixel_number as u16;
+            let pallette_address = 0x3F00 | (pallette_number << 2) as u16 | pixel_color_number;
 
-            /*
-            00 VV HHHH
-            || || ||||
-            || || ++++- Hue (phase, determines NTSC/PAL chroma)
-            || ++------ Value (voltage, determines NTSC/PAL luma)
-            ++--------- Unimplemented, reads back as 0
-            */
-            let color = self.read_ppu_bus(pallette_address);
-
-            let rgb = rgb::translate_nes_to_rgb(color);
-            let f = self.renderer;
-            f(x, y, rgb);
+            if self.read_mask_flag(MaskFlag::ShowBG)
+                && (y >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG))
+            {
+                /*
+                00 VV HHHH
+                || || ||||
+                || || ++++- Hue (phase, determines NTSC/PAL chroma)
+                || ++------ Value (voltage, determines NTSC/PAL luma)
+                ++--------- Unimplemented, reads back as 0
+                */
+                let color = self.read_pallette(pallette_address);
+                Some((x, y, color))
+            } else {
+                None
+            }
+        } else {
+            None
         }
     }
 
+    fn manage_tick(&mut self) {
+        // skip a tick on odd frames when rendering is enabled
+        if self.scan_line == -1 && self.tick == 339 && !self.even_frame && self.rendering_enabled()
+        {
+            self.tick = 340;
+        }
+        self.tick += 1;
+        if self.tick == 341 {
+            self.tick = 0;
+            self.scan_line += 1;
+            if self.scan_line == 261 {
+                self.scan_line = -1;
+                self.even_frame = !self.even_frame;
+            }
+        }
+    }
+
+    fn read_pallette(&self, addr: u16) -> u8 {
+        let physical = addr & PALETTE_MASK;
+        // TODO grey mode
+        self.pallettes[physical as usize]
+    }
+
+    fn write_pallette(&mut self, addr: u16, data: u8) -> u8 {
+        println!("Writing to pallette {:04X} {:02X}", addr, data);
+        let physical = addr & PALETTE_MASK;
+        // TODO grey mode
+        let old = self.pallettes[physical as usize];
+        self.pallettes[physical as usize] = data;
+        old
+    }
+
+    #[must_use]
+    fn manage_nmi(&mut self) -> bool {
+        if self.nmi_requested {
+            self.nmi_requested = false;
+            self.read_ctrl_flag(CtrlFlag::NmiEnabled)
+        } else {
+            false
+        }
+    }
 
     fn get_ctrl_flags(&self) -> u8 {
         self.ctrl_high_register | self.temporary_vram_address.get_nametable_bits()
@@ -307,14 +401,6 @@ impl PPU {
         (self.status_register & flag) != 0
     }
 
-    fn read_ppu_bus(&mut self, addr: u16) -> u8 {
-        self.bus.read(addr)
-    }
-
-    fn write_ppu_bus(&mut self, addr: u16, data: u8) -> u8 {
-        self.bus.write(addr, data)
-    }
-
     fn inc_vram_addr(&mut self) {
         let amount = if self.read_ctrl_flag(CtrlFlag::IncrementAcross) {
             32
@@ -328,34 +414,33 @@ impl PPU {
 impl BusDevice for PPU {
     fn read(&mut self, addr: u16) -> Option<u8> {
         if (CPU_ADDR_START..=CPU_ADDR_END).contains(&addr) {
-            self.last_read_buffer = match addr {
-                0x2000 => self.last_read_buffer,
-                0x2001 => self.last_read_buffer,
+            Some(match addr {
+                0x2000 => self.data_buffer,
+                0x2001 => self.data_buffer,
                 0x2002 => {
                     self.write_toggle = false;
-                    self.data_buffer = self.status_register | (self.last_read_buffer & 0x1F);
+                    let result = self.status_register | (self.data_buffer & 0x1F);
                     self.set_status_flag(StatusFlag::VerticalBlank, false);
-                    self.data_buffer
+                    result
                 }
-                0x2003 => self.last_read_buffer,
-                0x2004 => {self.data_buffer = self.oam_table[self.oam_addr as usize]; self.data_buffer},
-                0x2005 => self.last_read_buffer,
-                0x2006 => self.last_read_buffer,
+                0x2003 => self.data_buffer,
+                0x2004 => self.oam_table[self.oam_addr as usize],
+                0x2005 => self.data_buffer,
+                0x2006 => self.data_buffer,
                 0x2007 => {
-                    if (PALETTE_START..PALETTE_END).contains(&self.vram_address.register) {
-                        self.data_buffer = self.read_ppu_bus(self.vram_address.register & PALETTE_MASK);
-                        self.inc_vram_addr();
-                        self.data_buffer
+                    let addr = self.vram_address.register;
+                    let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
+                        self.read_pallette(addr)
                     } else {
                         let result = self.data_buffer;
-                        self.data_buffer = self.read_ppu_bus(self.vram_address.register);
-                        self.inc_vram_addr();
+                        self.bus_request = BusRequest::Read(addr);
                         result
-                    }
+                    };
+                    self.inc_vram_addr();
+                    result
                 }
                 physical => unreachable!("reading from ppu register {}", physical),
-            };
-            Some(self.last_read_buffer)
+            })
         } else {
             None
         }
@@ -363,15 +448,13 @@ impl BusDevice for PPU {
 
     fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
         if (CPU_ADDR_START..=CPU_ADDR_END).contains(&addr) {
-            self.data_buffer = data;
-            self.last_read_buffer = data;
             Some(match addr {
                 0x2000 => {
                     let old = self.get_ctrl_flags();
 
                     if self.read_status_flag(StatusFlag::VerticalBlank)
-                    && (old & CtrlFlag::NmiEnabled != 0)
-                    && (data & CtrlFlag::NmiEnabled == 0)
+                        && (old & CtrlFlag::NmiEnabled != 0)
+                        && (data & CtrlFlag::NmiEnabled == 0)
                     {
                         self.nmi_requested = true;
                     }
@@ -423,17 +506,19 @@ impl BusDevice for PPU {
                     }
                 }
                 0x2007 => {
-                    if (PALETTE_START..PALETTE_END).contains(&self.vram_address.register) {
-                        let result = self.write_ppu_bus(self.vram_address.register & PALETTE_MASK, data);
-                        self.inc_vram_addr();
-                        result
+                    let addr = self.vram_address.register;
+                    let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
+                        self.write_pallette(addr, data)
                     } else {
-                        let result = self.write_ppu_bus(self.vram_address.register, data);
-                        self.inc_vram_addr();
-                        result
-                    }
+                        println!("requesting write to bus {:04X} {:02X}", addr, data);
+                        let old = self.data_buffer;
+                        self.bus_request = BusRequest::Write(addr, data);
+                        old
+                    };
+                    self.inc_vram_addr();
+                    result
                 }
-                physical => unreachable!("reading from ppu register {}", physical),
+                physical => unreachable!("writing to ppu register {}", physical),
             })
         } else {
             None
@@ -459,7 +544,6 @@ pub fn create_test_configuration() -> (PPU, Rc<RefCell<crate::ram::RAM>>) {
     (ppu, mem)
 }
 
-
 struct VramAddress {
     /**
      * 0 yyy V H YYYYY XXXXX
@@ -479,7 +563,10 @@ struct VramAddress {
 
 impl VramAddress {
     fn new() -> Self {
-        Self { register: 0, fine_x: 0 }
+        Self {
+            register: 0,
+            fine_x: 0,
+        }
     }
     fn get_horizontal_nametable_selected(&self) -> bool {
         self.register & 0b0000010000000000 != 0
@@ -487,7 +574,11 @@ impl VramAddress {
 
     fn set_horizontal_nametable_selected(&mut self, value: bool) -> bool {
         let old = self.get_horizontal_nametable_selected();
-        self.register = if value {self.register | 0b0000010000000000} else {self.register & !0b0000010000000000};
+        self.register = if value {
+            self.register | 0b0000010000000000
+        } else {
+            self.register & !0b0000010000000000
+        };
         old
     }
 
@@ -497,7 +588,11 @@ impl VramAddress {
 
     fn set_vertical_nametable_selected(&mut self, value: bool) -> bool {
         let old = self.get_vertical_nametable_selected();
-        self.register = if value {self.register | 0b0000100000000000} else {self.register & !0b0000100000000000};
+        self.register = if value {
+            self.register | 0b0000100000000000
+        } else {
+            self.register & !0b0000100000000000
+        };
         old
     }
 
@@ -518,8 +613,7 @@ impl VramAddress {
 
     fn set_coarse_x(&mut self, x: u8) -> u8 {
         let result = self.get_coarse_x();
-        self.register =
-        (self.register & !0b0000000000011111) | ((x & 0b00011111) as u16);
+        self.register = (self.register & !0b0000000000011111) | ((x & 0b00011111) as u16);
         result
     }
 
@@ -540,8 +634,7 @@ impl VramAddress {
 
     fn set_coarse_y(&mut self, y: u8) -> u8 {
         let result = self.get_coarse_y();
-        self.register = (self.register & !0b0000001111100000)
-            | (((y & 0b00011111) as u16) << 5);
+        self.register = (self.register & !0b0000001111100000) | (((y & 0b00011111) as u16) << 5);
         result
     }
 
@@ -550,8 +643,7 @@ impl VramAddress {
     }
 
     fn set_fine_y(&mut self, y: u8) {
-        self.register = (self.register & !0b0111000000000000)
-        | (((y & 0b00000111) as u16) << 12)
+        self.register = (self.register & !0b0111000000000000) | (((y & 0b00000111) as u16) << 12)
     }
 
     fn get_address_high(&self) -> u8 {
@@ -560,8 +652,7 @@ impl VramAddress {
 
     fn set_address_high(&mut self, data: u8) -> u8 {
         let result = self.get_address_high();
-        self.register = (self.register & !0b0011111100000000)
-            | (((data & 0b00111111) as u16) << 8);
+        self.register = (self.register & !0b0011111100000000) | (((data & 0b00111111) as u16) << 8);
         result
     }
 
@@ -571,8 +662,7 @@ impl VramAddress {
 
     fn set_address_low(&mut self, data: u8) -> u8 {
         let result = self.get_address_low();
-        self.register =
-            (self.register & !0b0000000011111111) | (data as u16);
+        self.register = (self.register & !0b0000000011111111) | (data as u16);
         result
     }
 
@@ -615,7 +705,8 @@ impl VramAddress {
     }
 
     fn set_nametable_bits(&mut self, bits: u8) {
-        self.register = (self.register & !0b0000110000000000) | (((bits & 0b00000011) as u16) << 10);
+        self.register =
+            (self.register & !0b0000110000000000) | (((bits & 0b00000011) as u16) << 10);
     }
 
     fn inc_address(&mut self, ammount: u16) {
@@ -624,6 +715,8 @@ impl VramAddress {
 
     fn get_nametable_address(&self) -> u16 {
         /*
+         Basically mask out the fine y bits and bob's your uncle
+
          0010 NN YYYYY XXXXX
          |||| || ||||| +++++--- coarse X
          |||| || +++++--------- coarse Y
@@ -634,7 +727,11 @@ impl VramAddress {
     }
 
     fn get_attribute_address(&self) -> u16 {
-            /*
+        /*
+         Mask out the Fine Y bits, squish coarse X
+         and coarse Y down to their top 3 bits,
+         and put 1111 in the holes left
+
          0010 NN 1111 YYY XXX
          |||| || |||| ||| +++-- X: high 3 bits of coarse X (x/4)
          |||| || |||| +++------ Y: high 3 bits of coarse Y (y/4)
@@ -642,10 +739,82 @@ impl VramAddress {
          |||| ++--------------- N: nametable select
          ++++------------------ 0x2xxx
         */
-        0x2000 | 
+        0x2000 |
             (self.register & 0b000011000000000) | // name table select
             0b0000001111000000 | // fixed attribute offset
             ((self.register >> 4) & 0b0000000000111000) | // high 3 bits of coarse Y
             ((self.register >> 2) & 0b0000000000000111) // high 3 bits of coarse X
     }
+}
+
+struct BGShiftRegister {
+    data: u16,
+}
+
+impl BGShiftRegister {
+    fn new() -> Self {
+        Self { data: 0 }
+    }
+
+    fn load(&mut self, data: u8) {
+        self.data = (self.data & 0b1111111100000000) | (data as u16);
+    }
+
+    fn shift(&mut self) {
+        self.data = (self.data << 8) | (self.data & 0b0000000011111111);
+    }
+
+    fn bit(&mut self, n: u8) -> u16 {
+        if self.data & (1 << (15 - n)) == 0 {
+            0
+        } else {
+            1
+        }
+    }
+
+    fn current_byte(&mut self) -> u8 {
+        (self.data >> 8) as u8
+    }
+}
+
+struct BGShiftRegisterPair {
+    high: BGShiftRegister,
+    low: BGShiftRegister,
+}
+
+impl BGShiftRegisterPair {
+    fn new() -> Self {
+        Self {
+            high: BGShiftRegister::new(),
+            low: BGShiftRegister::new(),
+        }
+    }
+
+    fn load_high(&mut self, data: u8) {
+        self.high.load(data);
+    }
+
+    fn load_low(&mut self, data: u8) {
+        self.low.load(data);
+    }
+
+    fn shift(&mut self) {
+        self.high.shift();
+        self.low.shift();
+    }
+
+    fn bits(&mut self, n: u8) -> u16 {
+        self.high.bit(n) << 1 | self.high.bit(n)
+    }
+}
+
+/**
+ * The PPU takes 2 cycles to read/write its bus, except for
+ * palletes. So this enum represent a bus action to perform on
+ * the next cycle
+ */
+enum BusRequest {
+    Read(u16),
+    Write(u16, u8),
+    None,
 }

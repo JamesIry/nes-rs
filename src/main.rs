@@ -12,7 +12,7 @@ use std::{cell::RefCell, rc::Rc};
 use apu::APU;
 use cartridge::{Cartridge, CartridgeCPUPort, CartridgePPUPort};
 use cpu::{CPUType, CPU};
-use ppu::{PPU, nul_renderer};
+use ppu::{nul_renderer, PPU};
 use ram::RAM;
 #[cfg(test)]
 mod integration_tests {

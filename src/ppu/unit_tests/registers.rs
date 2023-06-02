@@ -1,6 +1,5 @@
 use crate::bus::BusDevice;
 use crate::ppu::flags::{CtrlFlag, MaskFlag, StatusFlag};
-use crate::ppu::PPU;
 
 #[test]
 fn test_ctrl_register() {
@@ -62,19 +61,21 @@ fn test_status_regiter() {
     // first ready should have cleared the vertical blank flag
     assert_eq!(Some(0 | StatusFlag::Sprite0Hit), ppu.read(0x2002));
 
-    check_read_from_write(&mut ppu, 0 | StatusFlag::Sprite0Hit);
     assert_eq!(0, ppu.vram_address.register);
 }
 
-#[cfg(test)]
-fn check_read_from_write(ppu: &mut PPU, expected: u8) {
+#[test]
+fn test_read_from_write() {
     // read from write only should return last read
+    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
 
-    assert_eq!(Some(expected), ppu.read(0x2000));
-    assert_eq!(Some(expected), ppu.read(0x2001));
-    assert_eq!(Some(expected), ppu.read(0x2003));
-    assert_eq!(Some(expected), ppu.read(0x2005));
-    assert_eq!(Some(expected), ppu.read(0x2006));
+    ppu.data_buffer = 0x42;
+
+    assert_eq!(Some(0x42), ppu.read(0x2000));
+    assert_eq!(Some(0x42), ppu.read(0x2001));
+    assert_eq!(Some(0x42), ppu.read(0x2003));
+    assert_eq!(Some(0x42), ppu.read(0x2005));
+    assert_eq!(Some(0x42), ppu.read(0x2006));
 }
 
 #[test]
@@ -98,7 +99,6 @@ fn test_oam_registers() {
     ppu.write(0x2003, 0x43);
     assert_eq!(Some(0x34), ppu.read(0x2004));
 
-    check_read_from_write(&mut ppu, 0x34);
     assert_eq!(0, ppu.vram_address.register);
 }
 
@@ -137,8 +137,8 @@ fn test_data_registers_small_stride() {
 
     ppu.set_ctrl_flag(CtrlFlag::IncrementAcross, false);
 
-    assert_eq!(0, ppu.read_ppu_bus(0x1234));
-    assert_eq!(0, ppu.read_ppu_bus(0x1235));
+    assert_eq!(0, ppu.bus.read(0x1234));
+    assert_eq!(0, ppu.bus.read(0x1235));
 
     ppu.write(0x2006, 0x12);
 
@@ -151,10 +151,10 @@ fn test_data_registers_small_stride() {
 
     ppu.write(0x2007, 0x42);
     assert!(!ppu.clock());
-    assert_eq!(0x42, ppu.read_ppu_bus(0x1234));
+    assert_eq!(0x42, ppu.bus.read(0x1234));
     ppu.write(0x2007, 0x43);
     assert!(!ppu.clock());
-    assert_eq!(0x43, ppu.read_ppu_bus(0x1235));
+    assert_eq!(0x43, ppu.bus.read(0x1235));
 
     ppu.write(0x2006, 0x12);
     ppu.write(0x2006, 0x34);
@@ -167,8 +167,6 @@ fn test_data_registers_small_stride() {
     assert_eq!(Some(0x42), ppu.read(0x2007));
     assert!(!ppu.clock());
     assert_eq!(Some(0x43), ppu.read(0x2007));
-
-    check_read_from_write(&mut ppu, 0x43);
 }
 
 #[test]
@@ -177,18 +175,18 @@ fn test_data_registers_large_stride() {
 
     ppu.set_ctrl_flag(CtrlFlag::IncrementAcross, true);
 
-    assert_eq!(0, ppu.read_ppu_bus(0x1234));
-    assert_eq!(0, ppu.read_ppu_bus(0x1254));
+    assert_eq!(0, ppu.bus.read(0x1234));
+    assert_eq!(0, ppu.bus.read(0x1254));
 
     ppu.write(0x2006, 0x12);
     ppu.write(0x2006, 0x34);
 
     ppu.write(0x2007, 0x42);
     assert!(!ppu.clock());
-    assert_eq!(0x42, ppu.read_ppu_bus(0x1234));
+    assert_eq!(0x42, ppu.bus.read(0x1234));
     ppu.write(0x2007, 0x43);
     assert!(!ppu.clock());
-    assert_eq!(0x43, ppu.read_ppu_bus(0x1254));
+    assert_eq!(0x43, ppu.bus.read(0x1254));
 
     ppu.write(0x2006, 0x12);
     ppu.write(0x2006, 0x34);
@@ -201,8 +199,6 @@ fn test_data_registers_large_stride() {
     assert_eq!(Some(0x42), ppu.read(0x2007));
     assert!(!ppu.clock());
     assert_eq!(Some(0x43), ppu.read(0x2007));
-
-    check_read_from_write(&mut ppu, 0x43);
 }
 
 #[test]
