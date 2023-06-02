@@ -1,4 +1,5 @@
 // TODO, I'd like to make this behave more 'realistically' with NTSC signals, but this is fine for now
+// see https://www.nesdev.org/wiki/NTSC_video for info on how to tanslate if/when
 pub fn translate_nes_to_rgb(nes: u8) -> (u8, u8, u8) {
     RGB_TRANSLATIOIN[nes as usize]
 }

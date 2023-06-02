@@ -23,7 +23,9 @@ const PALETTE_SIZE: usize = 0x1000;
 const PALETTE_MASK: u16 = 0x0FFF;
 const OAM_SIZE: usize = 0x0100;
 
-/* Not really a PPU yet. Just some read/write registers */
+/**
+ * The main source for building this out was https://www.nesdev.org/wiki/PPU
+ */
 pub struct PPU {
     renderer: fn(u16, u16, (u8, u8, u8)) -> (),
     ctrl_high_register: u8,
@@ -329,16 +331,20 @@ impl PPU {
 
     fn read_pallette(&self, addr: u16) -> u8 {
         let physical = addr & PALETTE_MASK;
-        // TODO grey mode
-        self.pallettes[physical as usize]
+        let data = self.pallettes[physical as usize];
+        // greyscale mode asks off the low bits
+        if self.read_mask_flag(MaskFlag::Greyscale) {
+            data & 0b00110000
+        } else {
+            data & 0b00111111
+        }
     }
 
     fn write_pallette(&mut self, addr: u16, data: u8) -> u8 {
         println!("Writing to pallette {:04X} {:02X}", addr, data);
         let physical = addr & PALETTE_MASK;
-        // TODO grey mode
         let old = self.pallettes[physical as usize];
-        self.pallettes[physical as usize] = data;
+        self.pallettes[physical as usize] = data & 0b00111111;
         old
     }
 
@@ -372,7 +378,7 @@ impl PPU {
         }
     }
 
-    fn read_ctrl_flag(&mut self, flag: CtrlFlag) -> bool {
+    fn read_ctrl_flag(&self, flag: CtrlFlag) -> bool {
         (self.get_ctrl_flags() & flag) != 0
     }
 
@@ -385,7 +391,7 @@ impl PPU {
         }
     }
 
-    fn read_mask_flag(&mut self, flag: MaskFlag) -> bool {
+    fn read_mask_flag(&self, flag: MaskFlag) -> bool {
         (self.mask_register & flag) != 0
     }
 
@@ -397,7 +403,7 @@ impl PPU {
         }
     }
 
-    fn read_status_flag(&mut self, flag: StatusFlag) -> bool {
+    fn read_status_flag(&self, flag: StatusFlag) -> bool {
         (self.status_register & flag) != 0
     }
 
