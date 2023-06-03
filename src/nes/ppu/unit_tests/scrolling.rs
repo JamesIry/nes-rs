@@ -1,11 +1,12 @@
 use crate::{
     bus::BusDevice,
-    ppu::flags::{CtrlFlag, MaskFlag, StatusFlag},
+    nes::ppu,
+    nes::ppu::flags::{CtrlFlag, MaskFlag, StatusFlag},
 };
 
 #[test]
 fn test_x_scroll() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     ppu.set_ctrl_flag(CtrlFlag::NmiEnabled, true);
     ppu.set_mask_flag(MaskFlag::ShowBG, true);
@@ -131,7 +132,7 @@ fn test_x_scroll() {
 #[test]
 fn test_scroll_post_render() {
     // post render lines shouldn't d any scroll behavior
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     ppu.set_ctrl_flag(CtrlFlag::NmiEnabled, true);
     ppu.set_mask_flag(MaskFlag::ShowBG, true);

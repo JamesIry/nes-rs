@@ -1,9 +1,10 @@
 use crate::bus::BusDevice;
-use crate::ppu::flags::{CtrlFlag, MaskFlag, StatusFlag};
+use crate::nes::ppu;
+use crate::nes::ppu::flags::{CtrlFlag, MaskFlag, StatusFlag};
 
 #[test]
 fn test_ctrl_register() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(0, ppu.get_ctrl_flags());
 
@@ -31,7 +32,7 @@ fn test_ctrl_register() {
 
 #[test]
 fn test_mask_register() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(0, ppu.mask_register);
 
@@ -46,7 +47,7 @@ fn test_mask_register() {
 
 #[test]
 fn test_status_regiter() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(Some(0), ppu.read(0x2002));
 
@@ -67,7 +68,7 @@ fn test_status_regiter() {
 #[test]
 fn test_read_from_write() {
     // read from write only should return last read
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     ppu.data_buffer = 0x42;
 
@@ -80,7 +81,7 @@ fn test_read_from_write() {
 
 #[test]
 fn test_oam_registers() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(ppu.oam_table, [0; 256]);
 
@@ -104,7 +105,7 @@ fn test_oam_registers() {
 
 #[test]
 fn test_scroll_registers() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(0, ppu.temporary_vram_address.get_x());
     assert_eq!(0, ppu.temporary_vram_address.get_y());
@@ -133,7 +134,7 @@ fn test_scroll_registers() {
 
 #[test]
 fn test_data_registers_small_stride() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     ppu.set_ctrl_flag(CtrlFlag::IncrementAcross, false);
 
@@ -171,7 +172,7 @@ fn test_data_registers_small_stride() {
 
 #[test]
 fn test_data_registers_large_stride() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     ppu.set_ctrl_flag(CtrlFlag::IncrementAcross, true);
 
@@ -203,7 +204,7 @@ fn test_data_registers_large_stride() {
 
 #[test]
 fn test_automatic_status() {
-    let (mut ppu, _mem) = crate::ppu::create_test_configuration();
+    let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(-1, ppu.scan_line);
     assert_eq!(0, ppu.tick);

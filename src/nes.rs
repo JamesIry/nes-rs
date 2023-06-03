@@ -1,0 +1,103 @@
+mod apu;
+mod cartridge;
+mod ppu;
+
+use std::{cell::RefCell, rc::Rc};
+
+use crate::cpu::{CPUType, CPU};
+use crate::ram::RAM;
+use anyhow::Result;
+use apu::APU;
+use cartridge::{Cartridge, CartridgeCPUPort, CartridgePPUPort};
+use ppu::PPU;
+#[cfg(test)]
+mod integration_tests {
+    mod nestest;
+}
+
+pub struct NES {
+    cpu: Rc<RefCell<CPU>>,
+    apu: Rc<RefCell<APU>>,
+    ppu: Rc<RefCell<PPU>>,
+    cartridge_cpu_port: Rc<RefCell<CartridgeCPUPort>>,
+    cartridge_ppu_port: Rc<RefCell<CartridgePPUPort>>,
+    tick: u8,
+}
+
+impl NES {
+    pub fn new(renderer: Box<dyn FnMut(u16, u16, u8, u8, u8)>) -> Self {
+        let cartridge = Rc::new(RefCell::new(Cartridge::nul_cartridge()));
+
+        let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
+        let ppu = Rc::new(RefCell::new(PPU::new(renderer)));
+        let apu = Rc::new(RefCell::new(APU::new(cpu.clone())));
+
+        // 0x0000 - 0x1FFFF "work" RAM (WRAM)
+        // NES ram is physically only 0x0000 - 0x07FF, but it's then "mirrored" 3 more
+        // times to 0x1FFF. "Mirroring" can be accomplished by masking off some bits
+        cpu.as_ref()
+            .borrow_mut()
+            .add_device(Rc::new(RefCell::new(RAM::new(0x0000, 0x1FFF, 0x07FF))));
+        //0x2000 - 0x3FFF  PPU Registers from 0x2000 to 0x2007 and then mirrored with mask 0x0007
+        cpu.as_ref().borrow_mut().add_device(ppu.clone());
+        //0x4000 - 0x4017  APU and IO registers
+        //0x4018 - 0x401F  APU and IO functionality that is disabled
+        cpu.as_ref().borrow_mut().add_device(apu.clone());
+        //0x4020 - 0xFFFF  Cartridge space
+        let cartridge_cpu_port = Rc::new(RefCell::new(CartridgeCPUPort::new(cartridge.clone())));
+        cpu.as_ref()
+            .borrow_mut()
+            .add_device(cartridge_cpu_port.clone());
+
+        let cartridge_ppu_port = Rc::new(RefCell::new(CartridgePPUPort::new(cartridge)));
+
+        ppu.as_ref()
+            .borrow_mut()
+            .add_device(cartridge_ppu_port.clone());
+
+        Self {
+            cpu,
+            apu,
+            ppu,
+            cartridge_cpu_port,
+            cartridge_ppu_port,
+            tick: 0,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.cpu.as_ref().borrow_mut().reset();
+        self.apu.as_ref().borrow_mut().reset();
+        self.ppu.as_ref().borrow_mut().reset();
+        self.tick = 0;
+    }
+
+    pub fn clock(&mut self) {
+        if self.tick == 0 {
+            self.apu.as_ref().borrow_mut().clock();
+            self.cpu.as_ref().borrow_mut().clock();
+        }
+
+        if self.ppu.as_ref().borrow_mut().clock() {
+            self.cpu.as_ref().borrow_mut().nmi();
+        }
+
+        self.tick += 1;
+        if self.tick == 3 {
+            self.tick = 0;
+        }
+    }
+
+    pub fn load_cartridge(&mut self, cartridge_name: String) -> Result<()> {
+        let cartridge = Cartridge::load(&cartridge_name)?;
+        let cart_ref = Rc::new(RefCell::new(cartridge));
+        self.cartridge_cpu_port
+            .replace(CartridgeCPUPort::new(cart_ref.clone()));
+        self.cartridge_ppu_port
+            .replace(CartridgePPUPort::new(cart_ref));
+
+        self.reset();
+
+        Ok(())
+    }
+}

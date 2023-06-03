@@ -1,3 +1,5 @@
+#![allow(clippy::upper_case_acronyms)]
+
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{bus::BusDevice, cpu::CPU};

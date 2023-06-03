@@ -1,4 +1,4 @@
-use crate::cartridge::{
+use crate::nes::cartridge::{
     mappers::{CartridgePpuLocation, Mapper},
     MirrorType,
 };

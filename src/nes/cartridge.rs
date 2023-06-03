@@ -10,6 +10,8 @@ use mappers::{CartridgeCpuLocation, Mapper};
 
 use crate::bus::BusDevice;
 
+use self::mappers::NulMapper;
+
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum MirrorType {
     Vertical,
@@ -42,6 +44,22 @@ static MAX_SRAM_ADDRESSIBLE: usize = 0x2000;
 static VRAM_SIZE: usize = 0x0800;
 
 impl Cartridge {
+    pub fn nul_cartridge() -> Self {
+        Self {
+            sram: Vec::new(),
+            sram_addr_mask: 0,
+            sram_is_persistent: false,
+            trainer: false,
+            trainer_ram: Vec::new(),
+            prg_rom: Vec::new(),
+            prg_rom_mask: 0,
+            chr_rom: Vec::new(),
+            chr_rom_mask: 0,
+            mapper: Box::new(NulMapper {}),
+            vram: Vec::new(),
+        }
+    }
+
     pub fn load(file_name: &str) -> Result<Self> {
         let file = File::open(file_name)?;
 
@@ -131,7 +149,7 @@ impl Cartridge {
         }
     }
 
-    fn read_cpu(&mut self, addr: u16) -> Option<u8> {
+    pub fn read_cpu(&mut self, addr: u16) -> Option<u8> {
         let location = self.translate_cpu_addr(addr);
         match location {
             mappers::CartridgeCpuLocation::None => None,
@@ -147,7 +165,7 @@ impl Cartridge {
         }
     }
 
-    fn write_cpu(&mut self, addr: u16, data: u8) -> Option<u8> {
+    pub fn write_cpu(&mut self, addr: u16, data: u8) -> Option<u8> {
         let location = self.translate_cpu_addr(addr);
         match location {
             mappers::CartridgeCpuLocation::None => None,
@@ -165,7 +183,7 @@ impl Cartridge {
         }
     }
 
-    fn read_ppu(&mut self, addr: u16) -> Option<u8> {
+    pub fn read_ppu(&mut self, addr: u16) -> Option<u8> {
         let location = self.mapper.translate_ppu_addr(addr);
         match location {
             mappers::CartridgePpuLocation::ChrRom(addr) => {
@@ -176,7 +194,8 @@ impl Cartridge {
             mappers::CartridgePpuLocation::None => None,
         }
     }
-    fn write_ppu(&mut self, addr: u16, data: u8) -> Option<u8> {
+
+    pub fn write_ppu(&mut self, addr: u16, data: u8) -> Option<u8> {
         let location = self.mapper.translate_ppu_addr(addr);
         match location {
             mappers::CartridgePpuLocation::ChrRom(addr) => {

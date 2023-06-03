@@ -5,14 +5,14 @@ use std::io::{BufRead, BufReader, BufWriter, Cursor, Write};
 use std::mem::swap;
 use std::rc::Rc;
 
-use crate::apu::APU;
-use crate::cartridge::{Cartridge, CartridgeCPUPort};
 use crate::cpu::decode::decode;
 use crate::cpu::flags::Flag;
 use crate::cpu::instructions::Instruction;
 use crate::cpu::monitor::Monitor;
 use crate::cpu::{CPUType, CPU};
-use crate::ppu::{nul_renderer, PPU};
+use crate::nes::apu::APU;
+use crate::nes::cartridge::{Cartridge, CartridgeCPUPort};
+use crate::nes::ppu::PPU;
 use crate::ram::RAM;
 use anyhow::Result;
 
@@ -26,7 +26,7 @@ fn test() {
     ));
 
     let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
-    let ppu = Rc::new(RefCell::new(PPU::new(nul_renderer)));
+    let ppu = Rc::new(RefCell::new(PPU::new(PPU::nul_renderer())));
 
     // 0x0000 - 0x1FFFF RAM
     // NES ram is physically only 0x0000 - 0x07FF, but it's then "mirrored" 3 more

@@ -18,3 +18,15 @@ pub enum CartridgePpuLocation {
     ChrRom(u16),
     VRam(u16),
 }
+
+pub struct NulMapper {}
+
+impl Mapper for NulMapper {
+    fn translate_cpu_addr(&mut self, _addr: u16) -> CartridgeCpuLocation {
+        CartridgeCpuLocation::None
+    }
+
+    fn translate_ppu_addr(&mut self, _addr: u16) -> CartridgePpuLocation {
+        CartridgePpuLocation::None
+    }
+}

@@ -19,15 +19,16 @@ const CPU_ADDR_START: u16 = 0x2000;
 const CPU_ADDR_END: u16 = 0x3FFF;
 const PALETTE_START: u16 = 0x3000;
 const PALETTE_END: u16 = 0xFFFF;
-const PALETTE_SIZE: usize = 0x1000;
-const PALETTE_MASK: u16 = 0x0FFF;
+const PALETTE_SIZE: usize = 0x0020;
+const PALETTE_MASK: u16 = 0x001F;
 const OAM_SIZE: usize = 0x0100;
 
 /**
  * The main source for building this out was https://www.nesdev.org/wiki/PPU
  */
+#[allow(clippy::upper_case_acronyms)]
 pub struct PPU {
-    renderer: fn(u16, u16, (u8, u8, u8)) -> (),
+    renderer: Box<dyn FnMut(u16, u16, u8, u8, u8)>,
     ctrl_high_register: u8,
     mask_register: u8,
     status_register: u8,
@@ -53,10 +54,13 @@ pub struct PPU {
     data_buffer: u8,
 }
 
-pub fn nul_renderer(_x: u16, _y: u16, _rgb: (u8, u8, u8)) {}
-
 impl PPU {
-    pub fn new(renderer: fn(u16, u16, (u8, u8, u8)) -> ()) -> Self {
+    #[cfg(test)]
+    pub fn nul_renderer() -> Box<dyn FnMut(u16, u16, u8, u8, u8)> {
+        Box::new(|_x: u16, _y: u16, _r: u8, _g: u8, _b: u8| ())
+    }
+
+    pub fn new(renderer: Box<dyn FnMut(u16, u16, u8, u8, u8)>) -> Self {
         Self {
             renderer,
             bus: Bus::new(),
@@ -90,9 +94,9 @@ impl PPU {
         if self.rendering_enabled() && self.scan_line < 240 {
             self.manage_shift_registers();
             if let Some((x, y, color)) = self.manage_render() {
-                let rgb = translate_nes_to_rgb(color);
-                let f = self.renderer;
-                f(x, y, rgb);
+                let (r, g, b) = translate_nes_to_rgb(color);
+                let f = &mut self.renderer;
+                f(x, y, r, g, b);
             }
             self.manage_scrolling();
         }
@@ -134,7 +138,6 @@ impl PPU {
                 self.bus_request = BusRequest::None;
             }
             BusRequest::Write(addr, data) => {
-                println!("Writing to bus {:04X} {:02X}", addr, data);
                 self.data_buffer = data;
                 self.bus.write(addr, data);
                 self.bus_request = BusRequest::None;
@@ -161,13 +164,13 @@ impl PPU {
 
     #[allow(clippy::manual_range_contains)]
     fn manage_scrolling(&mut self) {
-        println!(
+        /*println!(
             "tick {}, scan {}, scroll_x {}, scroll_y {}",
             self.tick,
             self.scan_line,
             self.vram_address.get_x(),
             self.vram_address.get_y()
-        );
+        );*/
 
         // manage scrolling
         match (self.scan_line, self.tick) {
@@ -213,7 +216,7 @@ impl PPU {
         ||| | |||| ++++------- C: Tile column (lower nibble of nametable_entry)
         ||| | ++++------------ R: Tile row (upper nibble of nametable_entry)
         ||| +----------------- H: Half of pattern table (0: left, 1: right) = CtrlFlag::BackgroundPatternHigh
-        +++------------------- 0: Pattern table is 0x0000 - 0x01FFFF
+        +++------------------- 0: Pattern table is 0x0000 - 0x01FFF
         */
         let pattern_address: u16 = if self.read_ctrl_flag(CtrlFlag::BackgroundPatternHigh) {
             0x1000
@@ -234,10 +237,10 @@ impl PPU {
                 }
                 2 => self.name_table_data.load(self.data_buffer),
 
-                3 if self.tick != 340 => self.bus_request = BusRequest::Read(attribute_address),
+                3 if self.tick != 339 => self.bus_request = BusRequest::Read(attribute_address),
                 4 if self.tick != 340 => self.attribute_data.load(self.data_buffer),
 
-                3 if self.tick == 340 => self.bus_request = BusRequest::Read(name_table_address),
+                3 if self.tick == 339 => self.bus_request = BusRequest::Read(name_table_address),
                 4 if self.tick == 340 => self.name_table_data.load(self.data_buffer),
 
                 5 if self.tick < 261 || self.tick > 320 => {
@@ -263,23 +266,26 @@ impl PPU {
         let x = self.tick;
         let y = self.scan_line as u16;
 
-        if x < 256 && y < 240 {
+        if x < 256
+            && y < 240
+            && self.read_mask_flag(MaskFlag::ShowBG)
+            && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG))
+        {
             let attribute_entry = self.attribute_data.current_byte();
 
-            let meta_tile_row = y >> 6; // y / 64
-            let meta_tile_column = x >> 6; // x / 64
-            let pallette_number = (attribute_entry
-                >> match (meta_tile_column & 0b1, meta_tile_row & 0b1) {
-                    (0, 0) => 0,
-                    (1, 0) => 2,
-                    (0, 1) => 4,
-                    (1, 1) => 6,
-                    (_, _) => unreachable!("got invalid pallette quadrant"),
-                })
-                & 0b11;
-
-            let x_offset = self.temporary_vram_address.fine_x + ((x.wrapping_sub(1) % 8) as u8);
+            let x_offset = self
+                .temporary_vram_address
+                .fine_x
+                .wrapping_add((x.wrapping_sub(1) % 8) as u8);
             let pixel_color_number = self.pattern_data.bits(x_offset);
+
+            let pallette_number = if pixel_color_number == 0 {
+                0
+            } else {
+                ((attribute_entry >> if y & 0b00100000 != 0 { 4 } else { 0 })
+                    >> if x & 0b00100000 != 0 { 2 } else { 0 })
+                    & 0b11
+            };
 
             /*
             00111111 xxx S PP CC
@@ -292,21 +298,15 @@ impl PPU {
             */
             let pallette_address = 0x3F00 | (pallette_number << 2) as u16 | pixel_color_number;
 
-            if self.read_mask_flag(MaskFlag::ShowBG)
-                && (y >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG))
-            {
-                /*
-                00 VV HHHH
-                || || ||||
-                || || ++++- Hue (phase, determines NTSC/PAL chroma)
-                || ++------ Value (voltage, determines NTSC/PAL luma)
-                ++--------- Unimplemented, reads back as 0
-                */
-                let color = self.read_pallette(pallette_address);
-                Some((x, y, color))
-            } else {
-                None
-            }
+            /*
+            00 VV HHHH
+            || || ||||
+            || || ++++- Hue (phase, determines NTSC/PAL chroma)
+            || ++------ Value (voltage, determines NTSC/PAL luma)
+            ++--------- Unimplemented, reads back as 0
+            */
+            let color = self.read_pallette(pallette_address);
+            Some((x, y, color))
         } else {
             None
         }
@@ -330,7 +330,15 @@ impl PPU {
     }
 
     fn read_pallette(&self, addr: u16) -> u8 {
-        let physical = addr & PALETTE_MASK;
+        let mirrored = addr & PALETTE_MASK;
+
+        // 10/14/18/1C are mapped to 00/04/08/0C
+        let physical = if mirrored & 0b11110011 == 0b00010000 {
+            mirrored & 0b00001100
+        } else {
+            mirrored
+        };
+
         let data = self.pallettes[physical as usize];
         // greyscale mode asks off the low bits
         if self.read_mask_flag(MaskFlag::Greyscale) {
@@ -341,8 +349,14 @@ impl PPU {
     }
 
     fn write_pallette(&mut self, addr: u16, data: u8) -> u8 {
-        println!("Writing to pallette {:04X} {:02X}", addr, data);
-        let physical = addr & PALETTE_MASK;
+        let mirrored = addr & PALETTE_MASK;
+
+        // 10/14/18/1C are mapped to 00/04/08/0C
+        let physical = if mirrored & 0b00010011 == 0b00010000 {
+            mirrored & 0b00001100
+        } else {
+            mirrored
+        };
         let old = self.pallettes[physical as usize];
         self.pallettes[physical as usize] = data & 0b00111111;
         old
@@ -516,7 +530,6 @@ impl BusDevice for PPU {
                     let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
                         self.write_pallette(addr, data)
                     } else {
-                        println!("requesting write to bus {:04X} {:02X}", addr, data);
                         let old = self.data_buffer;
                         self.bus_request = BusRequest::Write(addr, data);
                         old
@@ -544,7 +557,7 @@ struct OAMData {
 pub fn create_test_configuration() -> (PPU, Rc<RefCell<crate::ram::RAM>>) {
     use crate::ram::RAM;
 
-    let mut ppu = PPU::new(nul_renderer);
+    let mut ppu = PPU::new(PPU::nul_renderer());
     let mem = Rc::new(RefCell::new(RAM::new(0x0000, 0xFFFF, 0xFFFF)));
     ppu.add_device(mem.clone());
     (ppu, mem)
@@ -746,7 +759,7 @@ impl VramAddress {
          ++++------------------ 0x2xxx
         */
         0x2000 |
-            (self.register & 0b000011000000000) | // name table select
+            (self.register & 0b0000110000000000) | // name table select
             0b0000001111000000 | // fixed attribute offset
             ((self.register >> 4) & 0b0000000000111000) | // high 3 bits of coarse Y
             ((self.register >> 2) & 0b0000000000000111) // high 3 bits of coarse X

@@ -1,5 +1,7 @@
 // https://c74project.com/microcode/
 
+#![allow(clippy::upper_case_acronyms)]
+
 #[cfg(test)]
 mod unit_tests {
     mod test_addressing_modes;

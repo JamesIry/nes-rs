@@ -1,3 +1,22 @@
-Ultimataly targeted to being an NES emulator. Now it's just a 6502 emulator that passes functional tests of official opcodes plus enough unofficial opcodes and cartridge functionality to pass the automated "headless" test mode of nestest.nes. 
+Ultimataly targeted to being an NES emulator. Now very much a work in progress.
 
-In addition the PPU passes a bunch of unit tests that suggest its approximately doing something semi-sorta right for background rendering and ALU->PPU DMA, but until images are on the screen it's better to assume these are broken. Sprites are basically not implemented yet and joy pad emulation doesn't exist at all yet.
+I've chosen Rust SDL2 as a base library which means an external dependency. [Check here for installation](https://github.com/Rust-SDL2/rust-sdl2#sdl20-development-libraries)
+
+- [X] 6502
+    - [X] Official opcodes
+    - [X] Unofficial opcodes
+- [X] Cartridge Basics
+    - [X] Core
+    - [X] Mapper0/NROM
+- [ ] PPU
+    - [X] Registers
+    - [X] Scrolling
+    - [ ] Background rendering (in progress)
+    - [ ] Sprite rendering
+- [ ] ALU
+    - [X] Sprite DMA
+    - [ ] Sound DMA
+    - [ ] Sound
+- [ ] Input
+    - [ ] Joypad
+    - [ ] Other input devices TBD
