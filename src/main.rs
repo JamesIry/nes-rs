@@ -1,8 +1,8 @@
 use anyhow::Result;
 use nes::NES;
+use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-use sdl2::{event::Event, rect::Rect};
 use std::{
     cell::RefCell,
     env,

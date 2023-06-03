@@ -823,7 +823,7 @@ impl BGShiftRegisterPair {
     }
 
     fn bits(&mut self, n: u8) -> u16 {
-        self.high.bit(n) << 1 | self.high.bit(n)
+        self.high.bit(n) << 1 | self.low.bit(n)
     }
 }
 
