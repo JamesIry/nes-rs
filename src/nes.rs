@@ -1,5 +1,6 @@
 mod apu;
 mod cartridge;
+pub mod controllers;
 mod ppu;
 
 use std::{cell::RefCell, rc::Rc};
@@ -10,6 +11,8 @@ use anyhow::Result;
 use apu::APU;
 use cartridge::{Cartridge, CartridgeCPUPort, CartridgePPUPort};
 use ppu::PPU;
+
+use self::controllers::{Controller, NulController};
 #[cfg(test)]
 mod integration_tests {
     mod nestest;
@@ -22,6 +25,8 @@ pub struct NES {
     cartridge_cpu_port: Rc<RefCell<CartridgeCPUPort>>,
     cartridge_ppu_port: Rc<RefCell<CartridgePPUPort>>,
     tick: u8,
+    controller1: Rc<RefCell<dyn Controller>>,
+    controller2: Rc<RefCell<dyn Controller>>,
 }
 
 impl NES {
@@ -55,6 +60,9 @@ impl NES {
             .borrow_mut()
             .add_device(cartridge_ppu_port.clone());
 
+        let controller1 = Rc::new(RefCell::new(NulController::new()));
+        let controller2 = Rc::new(RefCell::new(NulController::new()));
+
         Self {
             cpu,
             apu,
@@ -62,6 +70,8 @@ impl NES {
             cartridge_cpu_port,
             cartridge_ppu_port,
             tick: 0,
+            controller1,
+            controller2,
         }
     }
 
@@ -74,7 +84,15 @@ impl NES {
 
     pub fn clock(&mut self) {
         if self.tick == 0 {
-            self.apu.as_ref().borrow_mut().clock();
+            {
+                let input1 = self.controller1.borrow().read_value();
+                let input2 = self.controller2.borrow().read_value();
+
+                let mut apu_borrowed = self.apu.as_ref().borrow_mut();
+                apu_borrowed.set_input_port1(input1);
+                apu_borrowed.set_input_port2(input2);
+                apu_borrowed.clock();
+            }
             self.cpu.as_ref().borrow_mut().clock();
         }
 
@@ -99,5 +117,13 @@ impl NES {
         self.reset();
 
         Ok(())
+    }
+
+    pub fn plugin_controller1(&mut self, controller: Rc<RefCell<dyn Controller>>) {
+        self.controller1 = controller;
+    }
+
+    pub fn plugin_controller2(&mut self, controller: Rc<RefCell<dyn Controller>>) {
+        self.controller2 = controller;
     }
 }

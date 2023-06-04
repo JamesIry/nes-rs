@@ -1,8 +1,9 @@
 use anyhow::Result;
-use nes::NES;
+use nes::{controllers::JoyPad, NES};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
+use std::collections::HashSet;
 use std::{
     cell::RefCell,
     env,
@@ -10,6 +11,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+
+use crate::nes::controllers::JoyPadButton;
 
 pub mod bus;
 pub mod cpu;
@@ -76,6 +79,8 @@ fn main() -> Result<()> {
 
     let mut nes = NES::new(renderer);
     nes.load_cartridge(cartridge_name.to_string())?;
+    let joypad1 = Rc::new(RefCell::new(JoyPad::new()));
+    nes.plugin_controller1(joypad1.clone());
 
     nes.reset();
 
@@ -94,6 +99,22 @@ fn main() -> Result<()> {
                 _ => (),
             }
         }
+        let keys: HashSet<Keycode> = event_pump
+            .keyboard_state()
+            .pressed_scancodes()
+            .filter_map(Keycode::from_scancode)
+            .collect();
+
+        let input: u8 = check_keycode(&keys, Keycode::W, JoyPadButton::Up)
+            | check_keycode(&keys, Keycode::A, JoyPadButton::Left)
+            | check_keycode(&keys, Keycode::S, JoyPadButton::Down)
+            | check_keycode(&keys, Keycode::D, JoyPadButton::Right)
+            | check_keycode(&keys, Keycode::J, JoyPadButton::A)
+            | check_keycode(&keys, Keycode::K, JoyPadButton::B)
+            | check_keycode(&keys, Keycode::Return, JoyPadButton::Start)
+            | check_keycode(&keys, Keycode::Backslash, JoyPadButton::Select);
+
+        joypad1.as_ref().borrow_mut().set_buttons(input);
 
         for _ in 0..CYCLES_PER_FRAME {
             nes.clock();
@@ -102,14 +123,26 @@ fn main() -> Result<()> {
 
         canvas.as_ref().borrow_mut().present();
 
-        frame += 1.0;
+        const DISPLAY_FRAME_RATE: bool = false;
 
-        if now < next_frame {
-            thread::sleep(next_frame - now);
+        if DISPLAY_FRAME_RATE {
+            frame += 1.0;
+
+            if now < next_frame {
+                thread::sleep(next_frame - now);
+            }
+            println!("Frames/sec: {}", frame / (now - start).as_secs_f32());
+            next_frame += frame_time;
         }
-        println!("Frames/sec: {}", frame / (now - start).as_secs_f32());
-        next_frame += frame_time;
     }
 
     Ok(())
+}
+
+fn check_keycode(keys: &HashSet<Keycode>, key: Keycode, button: JoyPadButton) -> u8 {
+    if keys.contains(&key) {
+        0 | button
+    } else {
+        0
+    }
 }

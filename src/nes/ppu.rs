@@ -47,9 +47,8 @@ pub struct PPU {
     vram_address: VramAddress,
     temporary_vram_address: VramAddress,
 
-    pattern_data: BGShiftRegisterPair,
-    attribute_data: BGShiftRegister,
-    name_table_data: BGShiftRegister,
+    bg_shift_registers: BGShiftRegisterSet,
+
     bus_request: BusRequest,
     data_buffer: u8,
 }
@@ -78,9 +77,7 @@ impl PPU {
             temporary_vram_address: VramAddress::new(),
             write_toggle: false,
 
-            pattern_data: BGShiftRegisterPair::new(),
-            attribute_data: BGShiftRegister::new(),
-            name_table_data: BGShiftRegister::new(),
+            bg_shift_registers: BGShiftRegisterSet::new(),
 
             data_buffer: 0,
             bus_request: BusRequest::None,
@@ -93,11 +90,7 @@ impl PPU {
         self.manage_status();
         if self.rendering_enabled() && self.scan_line < 240 {
             self.manage_shift_registers();
-            if let Some((x, y, color)) = self.manage_render() {
-                let (r, g, b) = translate_nes_to_rgb(color);
-                let f = &mut self.renderer;
-                f(x, y, r, g, b);
-            }
+            self.manage_render();
             self.manage_scrolling();
         }
         self.manage_tick();
@@ -124,9 +117,7 @@ impl PPU {
         self.write_toggle = false;
         self.vram_address = VramAddress::new();
         self.temporary_vram_address = VramAddress::new();
-        self.pattern_data = BGShiftRegisterPair::new();
-        self.attribute_data = BGShiftRegister::new();
-        self.name_table_data = BGShiftRegister::new();
+        self.bg_shift_registers = BGShiftRegisterSet::new();
 
         self.bus_request = BusRequest::None;
     }
@@ -192,123 +183,93 @@ impl PPU {
     fn manage_shift_registers(&mut self) {
         let name_table_address = self.vram_address.get_nametable_address();
         let attribute_address = self.vram_address.get_attribute_address();
-
-        /*
-         7654 3210
-         |||| ||++- 1-0: pallette number for top left quadrant of this meta tile
-         |||| ++--- 3-2: pallette number for top right quadrant of this meta tile
-         ||++------ 5-4: pallette number for bottom left quadrant of this meta tile
-         ++-------- 7-6: pallette number for bottom right quadrant of this meta tile
-        */
-        // attribute_data;
-
-        /*
-         RRRR CCCC
-         |||| ++++-------- tile column in pattern table
-         ++++------------- tile row in pattern table
-        */
-        // nametable_data;
-
-        /*
-        000 H RRRR CCCC P YYY
-        ||| | |||| |||| | +++- Y: Fine Y offset, the row number within a tile
-        ||| | |||| |||| +----- P: Bit plane (0: lower, 1: upper) (0 for reading bg low, 1 for reading bg high)
-        ||| | |||| ++++------- C: Tile column (lower nibble of nametable_entry)
-        ||| | ++++------------ R: Tile row (upper nibble of nametable_entry)
-        ||| +----------------- H: Half of pattern table (0: left, 1: right) = CtrlFlag::BackgroundPatternHigh
-        +++------------------- 0: Pattern table is 0x0000 - 0x01FFF
-        */
-        let pattern_address: u16 = if self.read_ctrl_flag(CtrlFlag::BackgroundPatternHigh) {
-            0x1000
-        } else {
-            0x0000
-        } | ((self.name_table_data.current_byte() as u16) << 4)
-            | (self.vram_address.get_fine_y() as u16);
+        let pattern_address = self.bg_shift_registers.get_pattern_address(
+            self.read_ctrl_flag(CtrlFlag::BackgroundPatternHigh),
+            self.vram_address.get_fine_y(),
+        );
 
         if self.tick > 0 {
             match self.tick % 8 {
                 1 => {
                     self.bus_request = BusRequest::Read(name_table_address);
                     if self.tick > 8 {
-                        self.attribute_data.shift();
-                        self.pattern_data.shift();
-                        self.name_table_data.shift();
+                        self.bg_shift_registers.shift();
                     }
                 }
-                2 => self.name_table_data.load(self.data_buffer),
+                2 => self
+                    .bg_shift_registers
+                    .load_name_table_data(self.data_buffer),
 
                 3 if self.tick != 339 => self.bus_request = BusRequest::Read(attribute_address),
-                4 if self.tick != 340 => self.attribute_data.load(self.data_buffer),
+                4 if self.tick != 340 => self
+                    .bg_shift_registers
+                    .load_attribute_data(self.data_buffer),
 
                 3 if self.tick == 339 => self.bus_request = BusRequest::Read(name_table_address),
-                4 if self.tick == 340 => self.name_table_data.load(self.data_buffer),
+                4 if self.tick == 340 => self
+                    .bg_shift_registers
+                    .load_name_table_data(self.data_buffer),
 
                 5 if self.tick < 261 || self.tick > 320 => {
                     self.bus_request = BusRequest::Read(pattern_address)
                 }
-                6 if self.tick < 261 || self.tick > 320 => {
-                    self.pattern_data.load_low(self.data_buffer)
-                }
+                6 if self.tick < 261 || self.tick > 320 => self
+                    .bg_shift_registers
+                    .load_pattern_data_low(self.data_buffer),
 
                 7 if self.tick < 261 || self.tick > 320 => {
                     self.bus_request = BusRequest::Read(pattern_address | 0b00001000)
                 }
-                0 if self.tick < 261 || self.tick > 320 => {
-                    self.pattern_data.load_high(self.data_buffer)
-                }
+                0 if self.tick < 261 || self.tick > 320 => self
+                    .bg_shift_registers
+                    .load_pattern_data_high(self.data_buffer),
 
                 _ => (),
             }
         }
     }
 
-    fn manage_render(&mut self) -> Option<(u16, u16, u8)> {
+    fn manage_render(&mut self) {
         let x = self.tick;
         let y = self.scan_line as u16;
 
-        if x < 256
-            && y < 240
-            && self.read_mask_flag(MaskFlag::ShowBG)
-            && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG))
-        {
-            let attribute_entry = self.attribute_data.current_byte();
+        if x < 256 && y < 240 {
+            let bg_color = if self.read_mask_flag(MaskFlag::ShowBG)
+                && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG))
+            {
+                let pallette_address = self.bg_shift_registers.get_pallette_address(
+                    x,
+                    y,
+                    self.temporary_vram_address.fine_x,
+                );
 
-            let x_offset = self
-                .temporary_vram_address
-                .fine_x
-                .wrapping_add((x.wrapping_sub(1) % 8) as u8);
-            let pixel_color_number = self.pattern_data.bits(x_offset);
-
-            let pallette_number = if pixel_color_number == 0 {
-                0
+                /*
+                00 VV HHHH
+                || || ||||
+                || || ++++- Hue (phase, determines NTSC/PAL chroma)
+                || ++------ Value (voltage, determines NTSC/PAL luma)
+                ++--------- Unimplemented, reads back as 0
+                */
+                self.read_pallette(pallette_address)
             } else {
-                ((attribute_entry >> if y & 0b00100000 != 0 { 4 } else { 0 })
-                    >> if x & 0b00100000 != 0 { 2 } else { 0 })
-                    & 0b11
+                0
             };
 
-            /*
-            00111111 xxx S PP CC
-            |||||||| ||| | || ||
-            |||||||| ||| | || ++- Color number from tile data
-            |||||||| ||| | ++---- Palette number from attribute table or OAM
-            |||||||| ||| +------- Background/Sprite select, 0=bg, 1=sprite
-            |||||||| +++--------- doesn't matter, effectively set to 0 for mirroring
-            ++++++++------------- 0x3F00 - 0x3FFF
-            */
-            let pallette_address = 0x3F00 | (pallette_number << 2) as u16 | pixel_color_number;
+            // TODO composite with sprite data
 
-            /*
-            00 VV HHHH
-            || || ||||
-            || || ++++- Hue (phase, determines NTSC/PAL chroma)
-            || ++------ Value (voltage, determines NTSC/PAL luma)
-            ++--------- Unimplemented, reads back as 0
-            */
-            let color = self.read_pallette(pallette_address);
-            Some((x, y, color))
-        } else {
-            None
+            const SHOW_GRID: bool = false;
+
+            let (r, g, b) = if SHOW_GRID && ((x.wrapping_sub(1) % 32 == 0) || (y % 32 == 0)) {
+                (255, 0, 0)
+            } else if SHOW_GRID && ((x.wrapping_sub(1) % 16 == 0) || (y % 16 == 0)) {
+                (0, 255, 0)
+            } else if SHOW_GRID && ((x.wrapping_sub(1) % 8 == 0) || (y % 8 == 0)) {
+                (0, 0, 255)
+            } else {
+                translate_nes_to_rgb(bg_color)
+            };
+            let f = &mut self.renderer;
+            f(x, y, r, g, b);
         }
     }
 
@@ -783,7 +744,7 @@ impl BGShiftRegister {
         self.data = (self.data << 8) | (self.data & 0b0000000011111111);
     }
 
-    fn bit(&mut self, n: u8) -> u16 {
+    fn bit(&self, n: u8) -> u16 {
         if self.data & (1 << (15 - n)) == 0 {
             0
         } else {
@@ -791,39 +752,127 @@ impl BGShiftRegister {
         }
     }
 
-    fn current_byte(&mut self) -> u8 {
+    fn current_byte(&self) -> u8 {
         (self.data >> 8) as u8
     }
 }
 
-struct BGShiftRegisterPair {
-    high: BGShiftRegister,
-    low: BGShiftRegister,
+struct BGShiftRegisterSet {
+    /**
+     * High and low bits for 2 bit pairs of color indices for each tile
+     */
+    pattern_data_high: BGShiftRegister,
+    pattern_data_low: BGShiftRegister,
+    /*
+     7654 3210
+     |||| ||++- 1-0: pallette number for top left quadrant of this meta tile
+     |||| ++--- 3-2: pallette number for top right quadrant of this meta tile
+     ||++------ 5-4: pallette number for bottom left quadrant of this meta tile
+     ++-------- 7-6: pallette number for bottom right quadrant of this meta tile
+    */
+    attribute_data: BGShiftRegister,
+    /*
+     RRRR CCCC
+     |||| ++++-------- tile column in pattern table
+     ++++------------- tile row in pattern table
+    */
+    name_table_data: BGShiftRegister,
 }
 
-impl BGShiftRegisterPair {
+impl BGShiftRegisterSet {
     fn new() -> Self {
         Self {
-            high: BGShiftRegister::new(),
-            low: BGShiftRegister::new(),
+            pattern_data_high: BGShiftRegister::new(),
+            pattern_data_low: BGShiftRegister::new(),
+            attribute_data: BGShiftRegister::new(),
+            name_table_data: BGShiftRegister::new(),
         }
     }
 
-    fn load_high(&mut self, data: u8) {
-        self.high.load(data);
-    }
-
-    fn load_low(&mut self, data: u8) {
-        self.low.load(data);
-    }
-
     fn shift(&mut self) {
-        self.high.shift();
-        self.low.shift();
+        self.pattern_data_high.shift();
+        self.pattern_data_low.shift();
+        self.attribute_data.shift();
+        self.name_table_data.shift();
     }
 
-    fn bits(&mut self, n: u8) -> u16 {
-        self.high.bit(n) << 1 | self.low.bit(n)
+    fn load_pattern_data_high(&mut self, data: u8) {
+        self.pattern_data_high.load(data);
+    }
+
+    fn load_pattern_data_low(&mut self, data: u8) {
+        self.pattern_data_low.load(data);
+    }
+
+    fn load_name_table_data(&mut self, data: u8) {
+        self.name_table_data.load(data);
+    }
+
+    fn load_attribute_data(&mut self, data: u8) {
+        self.attribute_data.load(data);
+    }
+
+    fn get_pattern_address(&self, background_high: bool, fine_y: u8) -> u16 {
+        /*
+        000 H RRRR CCCC P YYY
+        ||| | |||| |||| | +++- Y: Fine Y offset, the row number within a tile
+        ||| | |||| |||| +----- P: Bit plane (0: lower, 1: upper) (0 for reading bg low, 1 for reading bg high)
+        ||| | |||| ++++------- C: Tile column (lower nibble of nametable_entry)
+        ||| | ++++------------ R: Tile row (upper nibble of nametable_entry)
+        ||| +----------------- H: Half of pattern table (0: left, 1: right) = CtrlFlag::BackgroundPatternHigh
+        +++------------------- 0: Pattern table is 0x0000 - 0x01FFF
+        */
+        (if background_high { 0x1000 } else { 0x0000 })
+            | ((self.name_table_data.current_byte() as u16) << 4)
+            | (fine_y as u16)
+    }
+
+    /**
+     * Attribute data is in "meta tiles", which are 4x4 arrangements of 8x8 tiles,
+     * i.e. 32x32 pixels. Metatiles fall into a quadrant. Upper left is 0,
+     * upper right is 1, lower left is 2, and lower right is 3.
+     * Upper left needs no shifting, upper right needs 2, lower left needs 4,
+     * and lower right needs 6.
+     */
+    fn get_attribute_shift(x: u16, y: u16) -> u8 {
+        match ((y >> 5) & 1, (x >> 5) & 1) {
+            (0, 0) => 0,
+            (0, 1) => 2,
+            (1, 0) => 4,
+            (1, 1) => 6,
+            (j, i) => unreachable!("Quadrant ({},{})", j, i),
+        }
+    }
+
+    fn get_pixel_color_number(&self, x: u16, fine_x: u8) -> u16 {
+        let x_offset = fine_x.wrapping_add((x.wrapping_sub(1) % 8) as u8);
+        (self.pattern_data_high.bit(x_offset) << 1) | self.pattern_data_low.bit(x_offset)
+    }
+
+    fn get_pallet_number(&self, x: u16, y: u16) -> u8 {
+        let attribute_entry = self.attribute_data.current_byte();
+        (attribute_entry >> BGShiftRegisterSet::get_attribute_shift(x, y)) & 0b11
+    }
+
+    /**
+     * 00111111 xxx S PP CC
+     * |||||||| ||| | || ||
+     * |||||||| ||| | || ++- Color number from tile data
+     * |||||||| ||| | ++---- Palette number from attribute table or OAM
+     * |||||||| ||| +------- Background/Sprite select, 0=bg, 1=sprite
+     * |||||||| +++--------- doesn't matter, effectively set to 0 for mirroring
+     * ++++++++------------- 0x3F00 - 0x3FFF
+     */
+    fn get_pallette_address(&self, x: u16, y: u16, fine_x: u8) -> u16 {
+        let pixel_color_number = self.get_pixel_color_number(x, fine_x);
+
+        let pallette_number = if pixel_color_number == 0 {
+            0
+        } else {
+            self.get_pallet_number(x, y)
+        };
+
+        0x3F00 | (pallette_number << 2) as u16 | pixel_color_number
     }
 }
 
