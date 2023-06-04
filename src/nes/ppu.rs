@@ -23,6 +23,10 @@ const PALETTE_END: u16 = 0xFFFF;
 const PALETTE_SIZE: usize = 0x0020;
 const PALETTE_MASK: u16 = 0x001F;
 const OAM_SIZE: usize = 0x0100;
+const INITIAL_PALLETE_VALUES: [u8; PALETTE_SIZE] = [
+    0x09, 0x01, 0x00, 0x01, 0x00, 0x02, 0x02, 0x0D, 0x08, 0x10, 0x08, 0x24, 0x00, 0x00, 0x04, 0x2C,
+    0x09, 0x01, 0x34, 0x03, 0x00, 0x04, 0x00, 0x14, 0x08, 0x3A, 0x00, 0x02, 0x00, 0x20, 0x2C, 0x08,
+];
 
 /**
  * The main source for building this out was https://www.nesdev.org/wiki/PPU
@@ -69,7 +73,7 @@ impl PPU {
             mask_register: 0,
             status_register: 0,
             oam_addr: 0,
-            pallettes: [0; PALETTE_SIZE],
+            pallettes: INITIAL_PALLETE_VALUES,
             scan_line: -1,
             tick: 0,
             nmi_requested: false,
