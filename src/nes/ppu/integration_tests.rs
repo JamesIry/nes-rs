@@ -41,7 +41,7 @@ fn test_dma() {
     let cycles = cpu.as_ref().borrow_mut().cycles();
 
     ppu.as_ref().borrow_mut().write(0x2003, 0x02);
-    apu.as_ref().borrow_mut().write(0x4015, 0x03);
+    apu.as_ref().borrow_mut().write(0x4014, 0x03);
     apu.as_ref().borrow_mut().clock(); // process the write and clear cpu.rdy
 
     for _ in 0..513 {

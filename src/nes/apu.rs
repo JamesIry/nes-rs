@@ -8,7 +8,7 @@ const RANGE_START: u16 = 0x4000;
 const RANGE_END: u16 = 0x401F;
 const ADDR_MASK: u16 = 0x001F;
 
-const REGISTER_OAM_DMA_PAGE: usize = 0x15;
+const REGISTER_OAM_DMA_PAGE: usize = 0x14;
 const REGISTER_INPUT1: usize = 0x16;
 const REGISTER_INPUT2: usize = 0x17;
 

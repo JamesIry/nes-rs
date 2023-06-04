@@ -457,10 +457,7 @@ impl BusDevice for PPU {
                 }
                 0x0004 => {
                     let old = self.oam_table[self.oam_addr as usize];
-                    if self.scan_line >= 240
-                        || (!self.read_mask_flag(MaskFlag::ShowSprites)
-                            && !self.read_mask_flag(MaskFlag::ShowBG))
-                    {
+                    if self.scan_line >= 240 || !self.rendering_enabled() {
                         self.oam_table[self.oam_addr as usize] = data;
                     }
 
