@@ -95,7 +95,13 @@ impl Cartridge {
         });
 
         let prg_rom_size = (header[4] as usize) * PRG_ROM_PAGE_SIZE;
-        let chr_rom_size = (header[5] as usize) * CHR_ROM_PAGE_SIZE;
+        let mut chr_rom_size = (header[5] as usize) * CHR_ROM_PAGE_SIZE;
+        let chr_ram = if chr_rom_size == 0 {
+            chr_rom_size = CHR_ROM_PAGE_SIZE;
+            true
+        } else {
+            false
+        };
         let mut sram_size = (header[8] as usize) * SRAM_PAGE_SIZE;
         if sram_size == 0 {
             sram_size = SRAM_PAGE_SIZE;
@@ -117,7 +123,9 @@ impl Cartridge {
         reader.read_exact(&mut prg_rom)?;
 
         let mut chr_rom = vec![0; chr_rom_size];
-        reader.read_exact(&mut chr_rom)?;
+        if !chr_ram {
+            reader.read_exact(&mut chr_rom)?;
+        }
 
         let sram = vec![0; sram_size];
 

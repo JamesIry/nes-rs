@@ -114,8 +114,6 @@ impl NES {
         self.cartridge_ppu_port
             .replace(CartridgePPUPort::new(cart_ref));
 
-        self.reset();
-
         Ok(())
     }
 
