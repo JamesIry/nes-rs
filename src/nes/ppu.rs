@@ -17,12 +17,14 @@ use self::{
 
 const CPU_ADDR_START: u16 = 0x2000;
 const CPU_ADDR_END: u16 = 0x3FFF;
-const CPU_ADDR_MASK: u16 = 0x0007;
+const CPU_ADDR_MASK: u16 = 0x2007;
 const PALETTE_START: u16 = 0x3000;
 const PALETTE_END: u16 = 0xFFFF;
 const PALETTE_SIZE: usize = 0x0020;
 const PALETTE_MASK: u16 = 0x001F;
 const OAM_SIZE: usize = 0x0100;
+
+// blargg's power on pallette values. why not?
 const INITIAL_PALLETE_VALUES: [u8; PALETTE_SIZE] = [
     0x09, 0x01, 0x00, 0x01, 0x00, 0x02, 0x02, 0x0D, 0x08, 0x10, 0x08, 0x24, 0x00, 0x00, 0x04, 0x2C,
     0x09, 0x01, 0x34, 0x03, 0x00, 0x04, 0x00, 0x14, 0x08, 0x3A, 0x00, 0x02, 0x00, 0x20, 0x2C, 0x08,
@@ -400,19 +402,19 @@ impl BusDevice for PPU {
     fn read(&mut self, addr: u16) -> Option<u8> {
         if (CPU_ADDR_START..=CPU_ADDR_END).contains(&addr) {
             Some(match addr & CPU_ADDR_MASK {
-                0x0000 => self.data_buffer,
-                0x0001 => self.data_buffer,
-                0x0002 => {
+                0x2000 => self.data_buffer,
+                0x2001 => self.data_buffer,
+                0x2002 => {
                     self.write_toggle = false;
                     let result = self.status_register | (self.data_buffer & 0x1F);
                     self.set_status_flag(StatusFlag::VerticalBlank, false);
                     result
                 }
-                0x0003 => self.data_buffer,
-                0x0004 => self.oam_table[self.oam_addr as usize],
-                0x0005 => self.data_buffer,
-                0x0006 => self.data_buffer,
-                0x0007 => {
+                0x2003 => self.data_buffer,
+                0x2004 => self.oam_table[self.oam_addr as usize],
+                0x2005 => self.data_buffer,
+                0x2006 => self.data_buffer,
+                0x2007 => {
                     let addr = self.vram_address.register;
                     let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
                         self.read_pallette(addr)
@@ -435,7 +437,7 @@ impl BusDevice for PPU {
     fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
         if (CPU_ADDR_START..=CPU_ADDR_END).contains(&addr) {
             Some(match addr & CPU_ADDR_MASK {
-                0x0000 => {
+                0x2000 => {
                     let old = self.get_ctrl_flags();
 
                     if self.read_status_flag(StatusFlag::VerticalBlank)
@@ -448,18 +450,18 @@ impl BusDevice for PPU {
 
                     old
                 }
-                0x0001 => {
+                0x2001 => {
                     let old = self.mask_register;
                     self.mask_register = data;
                     old
                 }
-                0x0002 => 0,
-                0x0003 => {
+                0x2002 => 0,
+                0x2003 => {
                     let old = self.oam_addr;
                     self.oam_addr = data;
                     old
                 }
-                0x0004 => {
+                0x2004 => {
                     let old = self.oam_table[self.oam_addr as usize];
                     if self.scan_line >= 240 || !self.rendering_enabled() {
                         self.oam_table[self.oam_addr as usize] = data;
@@ -468,7 +470,7 @@ impl BusDevice for PPU {
                     self.oam_addr = self.oam_addr.wrapping_add(1);
                     old
                 }
-                0x0005 => {
+                0x2005 => {
                     if !self.write_toggle {
                         self.write_toggle = true;
                         self.temporary_vram_address.set_x(data)
@@ -477,7 +479,7 @@ impl BusDevice for PPU {
                         self.temporary_vram_address.set_y(data)
                     }
                 }
-                0x0006 => {
+                0x2006 => {
                     if !self.write_toggle {
                         self.write_toggle = true;
                         self.temporary_vram_address.set_address_high(data)
@@ -488,7 +490,7 @@ impl BusDevice for PPU {
                         result
                     }
                 }
-                0x0007 => {
+                0x2007 => {
                     let addr = self.vram_address.register;
                     let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
                         self.write_pallette(addr, data)
