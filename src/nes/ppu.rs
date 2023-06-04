@@ -130,7 +130,6 @@ impl PPU {
                 self.bus_request = BusRequest::None;
             }
             BusRequest::Write(addr, data) => {
-                self.data_buffer = data;
                 self.bus.write(addr, data);
                 self.bus_request = BusRequest::None;
             }
@@ -414,10 +413,11 @@ impl BusDevice for PPU {
                     let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
                         self.read_pallette(addr)
                     } else {
-                        let result = self.data_buffer;
-                        self.bus_request = BusRequest::Read(addr);
-                        result
+                        self.data_buffer
                     };
+                    // vram is read even when in pallette address range
+                    self.bus_request = BusRequest::Read(addr);
+
                     self.inc_vram_addr();
                     result
                 }
