@@ -441,8 +441,8 @@ impl BusDevice for PPU {
                     let old = self.get_ctrl_flags();
 
                     if self.read_status_flag(StatusFlag::VerticalBlank)
-                        && (old & CtrlFlag::NmiEnabled != 0)
-                        && (data & CtrlFlag::NmiEnabled == 0)
+                        && (old & CtrlFlag::NmiEnabled == 0)
+                        && (data & CtrlFlag::NmiEnabled != 0)
                     {
                         self.nmi_requested = true;
                     }
