@@ -226,7 +226,7 @@ impl PPU {
                 7 if self.tick < 261 || self.tick > 320 => {
                     self.bus_request = BusRequest::Read(pattern_address | 0b00001000)
                 }
-                0 if self.tick < 261 || self.tick > 320 => self
+                0 if (0 < self.tick && self.tick < 261) || self.tick > 320 => self
                     .bg_shift_registers
                     .load_pattern_data_high(self.data_buffer),
 
@@ -236,7 +236,7 @@ impl PPU {
     }
 
     fn manage_render(&mut self) {
-        let x = self.tick;
+        let x = self.tick.wrapping_sub(1);
         let y = self.scan_line as u16;
 
         if x < 256 && y < 240 {
@@ -244,6 +244,7 @@ impl PPU {
                 && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG))
             {
                 let pallette_address = self.bg_shift_registers.get_pallette_address(
+                    false,
                     x,
                     y,
                     self.temporary_vram_address.fine_x,
@@ -263,13 +264,13 @@ impl PPU {
 
             // TODO composite with sprite data
 
-            const SHOW_GRID: bool = false;
+            const SHOW_GRID: bool = true;
 
-            let (r, g, b) = if SHOW_GRID && ((x.wrapping_sub(1) % 32 == 0) || (y % 32 == 0)) {
+            let (r, g, b) = if SHOW_GRID && ((x % 32 == 0) || (y % 32 == 0)) {
                 (255, 0, 0)
-            } else if SHOW_GRID && ((x.wrapping_sub(1) % 16 == 0) || (y % 16 == 0)) {
+            } else if SHOW_GRID && ((x % 16 == 0) || (y % 16 == 0)) {
                 (0, 255, 0)
-            } else if SHOW_GRID && ((x.wrapping_sub(1) % 8 == 0) || (y % 8 == 0)) {
+            } else if SHOW_GRID && ((x % 8 == 0) || (y % 8 == 0)) {
                 (0, 0, 255)
             } else {
                 translate_nes_to_rgb(bg_color)
@@ -828,32 +829,26 @@ impl BGShiftRegisterSet {
         */
         (if background_high { 0x1000 } else { 0x0000 })
             | ((self.name_table_data.current_byte() as u16) << 4)
-            | (fine_y as u16)
+            | ((fine_y & 0b00000111) as u16)
     }
 
     /**
      * Attribute data is in "meta tiles", which are 4x4 arrangements of 8x8 tiles,
-     * i.e. 32x32 pixels. Metatiles fall into a quadrant. Upper left is 0,
+     * i.e. 32x32 pixels. Metatiles are divided into 4 16x16 quadrants. Upper left is 0,
      * upper right is 1, lower left is 2, and lower right is 3.
      * Upper left needs no shifting, upper right needs 2, lower left needs 4,
      * and lower right needs 6.
      */
-    fn get_attribute_shift(x: u16, y: u16) -> u8 {
-        match ((y >> 5) & 1, (x >> 5) & 1) {
-            (0, 0) => 0,
-            (0, 1) => 2,
-            (1, 0) => 4,
-            (1, 1) => 6,
-            (j, i) => unreachable!("Quadrant ({},{})", j, i),
-        }
+    fn get_attribute_shift(x: u16, y: u16) -> u16 {
+        ((y >> 2) & 0b100) | ((x >> 3) & 0b010)
     }
 
     fn get_pixel_color_number(&self, x: u16, fine_x: u8) -> u16 {
-        let x_offset = fine_x.wrapping_add((x.wrapping_sub(1) % 8) as u8);
+        let x_offset = fine_x.wrapping_add((x & 0b111) as u8);
         (self.pattern_data_high.bit(x_offset) << 1) | self.pattern_data_low.bit(x_offset)
     }
 
-    fn get_pallet_number(&self, x: u16, y: u16) -> u8 {
+    fn get_pallete_number(&self, x: u16, y: u16) -> u8 {
         let attribute_entry = self.attribute_data.current_byte();
         (attribute_entry >> BGShiftRegisterSet::get_attribute_shift(x, y)) & 0b11
     }
@@ -864,19 +859,22 @@ impl BGShiftRegisterSet {
      * |||||||| ||| | || ++- Color number from tile data
      * |||||||| ||| | ++---- Palette number from attribute table or OAM
      * |||||||| ||| +------- Background/Sprite select, 0=bg, 1=sprite
-     * |||||||| +++--------- doesn't matter, effectively set to 0 for mirroring
+     * |||||||| +++--------- doesn't matter, effectively set to 0 by mirroring
      * ++++++++------------- 0x3F00 - 0x3FFF
      */
-    fn get_pallette_address(&self, x: u16, y: u16, fine_x: u8) -> u16 {
+    fn get_pallette_address(&self, sprite: bool, x: u16, y: u16, fine_x: u8) -> u16 {
         let pixel_color_number = self.get_pixel_color_number(x, fine_x);
 
         let pallette_number = if pixel_color_number == 0 {
             0
         } else {
-            self.get_pallet_number(x, y)
+            self.get_pallete_number(x, y)
         };
 
-        0x3F00 | (pallette_number << 2) as u16 | pixel_color_number
+        0x3F00
+            | if sprite { 0b10000 } else { 0 }
+            | (pallette_number << 2) as u16
+            | pixel_color_number
     }
 }
 
