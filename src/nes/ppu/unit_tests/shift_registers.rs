@@ -150,33 +150,38 @@ fn test_bg_shift_register_set_pallette_number() {
 
     set.load_attribute_data(0b00011011);
     set.shift();
+    set.load_attribute_data(0b10101101);
     set.shift();
 
     for y in 0..16 {
         for x in 0..16 {
             assert_eq!(0, BGShiftRegisterSet::get_attribute_shift(x, y));
-            assert_eq!(0b11, set.get_pallete_number(x, y));
+            assert_eq!(0b11, set.get_pallete_number(x, y, 0));
+            assert_eq!(0b01, set.get_pallete_number(x, y, 8));
         }
     }
 
     for y in 0..16 {
         for x in 16..32 {
             assert_eq!(2, BGShiftRegisterSet::get_attribute_shift(x, y));
-            assert_eq!(0b10, set.get_pallete_number(x, y));
+            assert_eq!(0b10, set.get_pallete_number(x, y, 0));
+            assert_eq!(0b11, set.get_pallete_number(x, y, 8));
         }
     }
 
     for y in 16..32 {
         for x in 0..16 {
             assert_eq!(4, BGShiftRegisterSet::get_attribute_shift(x, y));
-            assert_eq!(0b01, set.get_pallete_number(x, y));
+            assert_eq!(0b01, set.get_pallete_number(x, y, 0));
+            assert_eq!(0b10, set.get_pallete_number(x, y, 8));
         }
     }
 
     for y in 16..32 {
         for x in 16..32 {
             assert_eq!(6, BGShiftRegisterSet::get_attribute_shift(x, y));
-            assert_eq!(0b00, set.get_pallete_number(x, y));
+            assert_eq!(0b00, set.get_pallete_number(x, y, 0));
+            assert_eq!(0b10, set.get_pallete_number(x, y, 8));
         }
     }
 }

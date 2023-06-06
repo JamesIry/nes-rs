@@ -764,6 +764,10 @@ impl BGShiftRegister {
     fn current_byte(&self) -> u8 {
         (self.data >> 8) as u8
     }
+
+    fn staged_byte(&self) -> u8 {
+        (self.data & 0b0000000011111111) as u8
+    }
 }
 
 struct BGShiftRegisterSet {
@@ -851,8 +855,12 @@ impl BGShiftRegisterSet {
         (self.pattern_data_high.bit(x_offset) << 1) | self.pattern_data_low.bit(x_offset)
     }
 
-    fn get_pallete_number(&self, x: u16, y: u16) -> u8 {
-        let attribute_entry = self.attribute_data.current_byte();
+    fn get_pallete_number(&self, x: u16, y: u16, fine_x: u8) -> u8 {
+        let attribute_entry = if (x % 8).wrapping_add(fine_x as u16) < 8 {
+            self.attribute_data.current_byte()
+        } else {
+            self.attribute_data.staged_byte()
+        };
         (attribute_entry >> BGShiftRegisterSet::get_attribute_shift(x, y)) & 0b11
     }
 
@@ -871,7 +879,7 @@ impl BGShiftRegisterSet {
         let pallette_number = if pixel_color_number == 0 {
             0
         } else {
-            self.get_pallete_number(x, y)
+            self.get_pallete_number(x, y, fine_x)
         };
 
         0x3F00
