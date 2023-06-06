@@ -198,9 +198,6 @@ impl PPU {
             match self.tick % 8 {
                 1 => {
                     self.bus_request = BusRequest::Read(name_table_address);
-                    if self.tick > 8 {
-                        self.bg_shift_registers.shift();
-                    }
                 }
                 2 => self
                     .bg_shift_registers
@@ -226,9 +223,12 @@ impl PPU {
                 7 if self.tick < 261 || self.tick > 320 => {
                     self.bus_request = BusRequest::Read(pattern_address | 0b00001000)
                 }
-                0 if (0 < self.tick && self.tick < 261) || self.tick > 320 => self
-                    .bg_shift_registers
-                    .load_pattern_data_high(self.data_buffer),
+                0 if (1 <= self.tick && self.tick < 261) || self.tick > 320 => {
+                    self.bg_shift_registers
+                        .load_pattern_data_high(self.data_buffer);
+
+                    self.bg_shift_registers.shift();
+                }
 
                 _ => (),
             }
@@ -236,7 +236,7 @@ impl PPU {
     }
 
     fn manage_render(&mut self) {
-        let x = self.tick.wrapping_sub(1);
+        let x = self.tick;
         let y = self.scan_line as u16;
 
         if x < 256 && y < 240 {
@@ -264,7 +264,7 @@ impl PPU {
 
             // TODO composite with sprite data
 
-            const SHOW_GRID: bool = true;
+            const SHOW_GRID: bool = false;
 
             let (r, g, b) = if SHOW_GRID && ((x % 32 == 0) || (y % 32 == 0)) {
                 (255, 0, 0)
@@ -733,20 +733,24 @@ impl VramAddress {
 }
 
 struct BGShiftRegister {
+    prefetch: u8,
     data: u16,
 }
 
 impl BGShiftRegister {
     fn new() -> Self {
-        Self { data: 0 }
+        Self {
+            prefetch: 0,
+            data: 0,
+        }
     }
 
     fn load(&mut self, data: u8) {
-        self.data = (self.data & 0b1111111100000000) | (data as u16);
+        self.prefetch = data;
     }
 
     fn shift(&mut self) {
-        self.data = (self.data << 8) | (self.data & 0b0000000011111111);
+        self.data = (self.data << 8) | (self.prefetch as u16)
     }
 
     fn bit(&self, n: u8) -> u16 {
@@ -781,7 +785,7 @@ struct BGShiftRegisterSet {
      |||| ++++-------- tile column in pattern table
      ++++------------- tile row in pattern table
     */
-    name_table_data: BGShiftRegister,
+    name_table_data: u8,
 }
 
 impl BGShiftRegisterSet {
@@ -790,7 +794,7 @@ impl BGShiftRegisterSet {
             pattern_data_high: BGShiftRegister::new(),
             pattern_data_low: BGShiftRegister::new(),
             attribute_data: BGShiftRegister::new(),
-            name_table_data: BGShiftRegister::new(),
+            name_table_data: 0,
         }
     }
 
@@ -798,7 +802,6 @@ impl BGShiftRegisterSet {
         self.pattern_data_high.shift();
         self.pattern_data_low.shift();
         self.attribute_data.shift();
-        self.name_table_data.shift();
     }
 
     fn load_pattern_data_high(&mut self, data: u8) {
@@ -810,7 +813,7 @@ impl BGShiftRegisterSet {
     }
 
     fn load_name_table_data(&mut self, data: u8) {
-        self.name_table_data.load(data);
+        self.name_table_data = data;
     }
 
     fn load_attribute_data(&mut self, data: u8) {
@@ -828,7 +831,7 @@ impl BGShiftRegisterSet {
         +++------------------- 0: Pattern table is 0x0000 - 0x01FFF
         */
         (if background_high { 0x1000 } else { 0x0000 })
-            | ((self.name_table_data.current_byte() as u16) << 4)
+            | ((self.name_table_data as u16) << 4)
             | ((fine_y & 0b00000111) as u16)
     }
 

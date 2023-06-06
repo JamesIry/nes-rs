@@ -5,12 +5,16 @@ fn test_bg_shift_register() {
     let mut reg = BGShiftRegister::new();
 
     assert_eq!(0, reg.data);
+    assert_eq!(0, reg.prefetch);
     assert_eq!(0, reg.current_byte());
     for i in 0..16 {
         assert_eq!(0, reg.bit(i));
     }
 
     reg.load(0x12);
+    assert_eq!(0, reg.data);
+
+    reg.shift();
     assert_eq!(0x0012, reg.data);
     assert_eq!(0, reg.current_byte());
     for i in 0..8 {
@@ -38,6 +42,7 @@ fn test_bg_shift_register() {
     assert_eq!(0, reg.bit(7));
 
     reg.load(0x34);
+    reg.shift();
     assert_eq!(0x1234, reg.data);
     assert_eq!(0, reg.bit(8));
     assert_eq!(0, reg.bit(9));
@@ -54,7 +59,7 @@ fn test_bg_shift_register_set_basics() {
     let mut set = BGShiftRegisterSet::new();
 
     assert_eq!(0, set.attribute_data.data);
-    assert_eq!(0, set.name_table_data.data);
+    assert_eq!(0, set.name_table_data);
     assert_eq!(0, set.pattern_data_low.data);
     assert_eq!(0, set.pattern_data_high.data);
 
@@ -62,16 +67,17 @@ fn test_bg_shift_register_set_basics() {
     set.load_name_table_data(0x34);
     set.load_pattern_data_low(0x56);
     set.load_pattern_data_high(0x78);
+    set.shift();
 
     assert_eq!(0x0012, set.attribute_data.data);
-    assert_eq!(0x0034, set.name_table_data.data);
+    assert_eq!(0x34, set.name_table_data);
     assert_eq!(0x0056, set.pattern_data_low.data);
     assert_eq!(0x0078, set.pattern_data_high.data);
 
     set.shift();
 
     assert_eq!(0x1212, set.attribute_data.data);
-    assert_eq!(0x3434, set.name_table_data.data);
+    assert_eq!(0x34, set.name_table_data);
     assert_eq!(0x5656, set.pattern_data_low.data);
     assert_eq!(0x7878, set.pattern_data_high.data);
 
@@ -79,9 +85,10 @@ fn test_bg_shift_register_set_basics() {
     set.load_name_table_data(0xBC);
     set.load_pattern_data_low(0xDE);
     set.load_pattern_data_high(0xF0);
+    set.shift();
 
     assert_eq!(0x129A, set.attribute_data.data);
-    assert_eq!(0x34BC, set.name_table_data.data);
+    assert_eq!(0xBC, set.name_table_data);
     assert_eq!(0x56DE, set.pattern_data_low.data);
     assert_eq!(0x78F0, set.pattern_data_high.data);
 }
@@ -91,13 +98,10 @@ fn test_bg_shift_register_set_pattern_address() {
     let mut set = BGShiftRegisterSet::new();
 
     set.load_name_table_data(0x12);
-    set.shift();
-    set.load_name_table_data(0xCA);
-
     assert_eq!(0x0127, set.get_pattern_address(false, 7));
     assert_eq!(0x1125, set.get_pattern_address(true, 5));
 
-    set.shift();
+    set.load_name_table_data(0xCA);
     assert_eq!(0x0CA7, set.get_pattern_address(false, 0xF));
     assert_eq!(0x1CA4, set.get_pattern_address(true, 0xC));
 }
@@ -111,6 +115,7 @@ fn test_bg_shift_register_set_pixel_color() {
     set.shift();
     set.load_pattern_data_high(0b11110000);
     set.load_pattern_data_low(0b10101010);
+    set.shift();
 
     assert_eq!(0b00, set.get_pixel_color_number(0, 0));
     assert_eq!(0b01, set.get_pixel_color_number(0, 1));
@@ -144,6 +149,7 @@ fn test_bg_shift_register_set_pallette_number() {
     let mut set = BGShiftRegisterSet::new();
 
     set.load_attribute_data(0b00011011);
+    set.shift();
     set.shift();
 
     for y in 0..16 {
@@ -186,6 +192,7 @@ fn test_bg_shift_register_get_pallette_address() {
     set.load_pattern_data_high(0b11110000);
     set.load_pattern_data_low(0b10101010);
     set.load_attribute_data(0b00010110);
+    set.shift();
 
     assert_eq!(0b0011111100000000, set.get_pallette_address(false, 0, 0, 0));
     assert_eq!(0b0011111100010000, set.get_pallette_address(true, 0, 0, 0));
@@ -193,7 +200,16 @@ fn test_bg_shift_register_get_pallette_address() {
     assert_eq!(0b0011111100001101, set.get_pallette_address(false, 0, 0, 1));
     assert_eq!(0b0011111100001111, set.get_pallette_address(false, 0, 0, 5));
     assert_eq!(0b0011111100001111, set.get_pallette_address(false, 5, 0, 0));
-    assert_eq!(0b0011111100001011, set.get_pallette_address(false, 21, 0, 0));
-    assert_eq!(0b0011111100000111, set.get_pallette_address(false, 5, 16, 0));
-    assert_eq!(0b0011111100000011, set.get_pallette_address(false, 21, 16, 0));
+    assert_eq!(
+        0b0011111100001011,
+        set.get_pallette_address(false, 21, 0, 0)
+    );
+    assert_eq!(
+        0b0011111100000111,
+        set.get_pallette_address(false, 5, 16, 0)
+    );
+    assert_eq!(
+        0b0011111100000011,
+        set.get_pallette_address(false, 21, 16, 0)
+    );
 }
