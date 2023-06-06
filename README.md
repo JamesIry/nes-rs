@@ -8,15 +8,22 @@ I've chosen Rust SDL2 as a base library which means an external dependency. [Che
 - [X] Cartridge Basics
     - [X] Core
     - [X] Mapper0/NROM
+- [X] Input
+    - [X] General controller support
+    - [X] Joypad
 - [ ] PPU
     - [X] Registers
     - [X] Scrolling
-    - [ ] Background rendering (in progress)
-    - [ ] Sprite rendering
+    - [X] Background rendering
+    - [ ] Sprite rendering  (in progress)
 - [ ] ALU
     - [X] Sprite DMA
     - [ ] Sound DMA
     - [ ] Sound
-- [ ] Input
-    - [ ] Joypad
-    - [ ] Other input devices TBD
+- [ ] Detailed Timing
+    - Cycle correct 6502
+    - Fix NMI timing
+- [ ] Other Mappers
+    - [ ] Mapper1/MMC
+    - [ ] Other MMC deriviatives
+    - [ ] More TBD
