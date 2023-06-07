@@ -212,7 +212,7 @@ fn test_bg_shift_register_set_pixel_color() {
 }
 
 #[test]
-fn test_bg_shift_register_get_pallette_address() {
+fn test_bg_shift_register_get_palette_address() {
     let mut set = BGShiftRegisterSet::new();
 
     set.load_pattern_data_high(0b00001111);
@@ -224,12 +224,11 @@ fn test_bg_shift_register_get_pallette_address() {
     set.load_attribute_data(0b00010110, 0); // 10
     set.shift();
 
-    assert_eq!(0b0011111100000000, set.get_pallette_address(false, 0, 0));
-    assert_eq!(0b0011111100010000, set.get_pallette_address(true, 0, 0));
+    assert_eq!(0b0011111100000000, set.get_palette_address(false, 0, 0));
+    assert_eq!(0b0011111100010000, set.get_palette_address(true, 0, 0));
 
-    assert_eq!(0b0011111100000101, set.get_pallette_address(false, 0, 1));
-    assert_eq!(0b0011111100000111, set.get_pallette_address(false, 0, 5));
-    assert_eq!(0b0011111100000111, set.get_pallette_address(false, 5, 0));
-    assert_eq!(0b0011111100000111, set.get_pallette_address(false, 21, 0));
-
+    assert_eq!(0b0011111100000101, set.get_palette_address(false, 0, 1));
+    assert_eq!(0b0011111100000111, set.get_palette_address(false, 0, 5));
+    assert_eq!(0b0011111100000111, set.get_palette_address(false, 5, 0));
+    assert_eq!(0b0011111100000111, set.get_palette_address(false, 21, 0));
 }

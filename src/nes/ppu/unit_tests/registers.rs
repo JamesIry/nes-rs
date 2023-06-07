@@ -49,9 +49,13 @@ fn test_mask_register() {
 fn test_status_regiter() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
-    assert_eq!(Some(0), ppu.read(0x2002));
+    assert_eq!(
+        Some(StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow),
+        ppu.read(0x2002)
+    );
 
     ppu.set_status_flag(StatusFlag::VerticalBlank, true);
+    ppu.set_status_flag(StatusFlag::SpriteOverflow, false);
     ppu.set_status_flag(StatusFlag::Sprite0Hit, true);
 
     assert_eq!(

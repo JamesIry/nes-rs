@@ -24,8 +24,8 @@ const PALETTE_SIZE: usize = 0x0020;
 const PALETTE_MASK: u16 = 0x001F;
 const OAM_SIZE: usize = 0x0100;
 
-// blargg's power on pallette values. why not?
-const INITIAL_PALLETE_VALUES: [u8; PALETTE_SIZE] = [
+// blargg's power on palette values. why not?
+const INITIAL_PALETTE_VALUES: [u8; PALETTE_SIZE] = [
     0x09, 0x01, 0x00, 0x01, 0x00, 0x02, 0x02, 0x0D, 0x08, 0x10, 0x08, 0x24, 0x00, 0x00, 0x04, 0x2C,
     0x09, 0x01, 0x34, 0x03, 0x00, 0x04, 0x00, 0x14, 0x08, 0x3A, 0x00, 0x02, 0x00, 0x20, 0x2C, 0x08,
 ];
@@ -43,7 +43,7 @@ pub struct PPU {
 
     bus: Bus,
     oam_table: [u8; OAM_SIZE],
-    pallettes: [u8; PALETTE_SIZE],
+    palettes: [u8; PALETTE_SIZE],
     scan_line: i16,
     tick: u16,
 
@@ -58,6 +58,8 @@ pub struct PPU {
 
     bus_request: BusRequest,
     data_buffer: u8,
+
+    resetting: bool,
 }
 
 impl PPU {
@@ -68,14 +70,15 @@ impl PPU {
 
     pub fn new(renderer: Box<dyn FnMut(u16, u16, u8, u8, u8)>) -> Self {
         Self {
+            resetting: true,
             renderer,
             bus: Bus::new(),
             oam_table: [0; OAM_SIZE],
             ctrl_high_register: 0,
             mask_register: 0,
-            status_register: 0,
+            status_register: StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow,
             oam_addr: 0,
-            pallettes: INITIAL_PALLETE_VALUES,
+            palettes: INITIAL_PALETTE_VALUES,
             scan_line: -1,
             tick: 0,
             nmi_requested: false,
@@ -113,20 +116,25 @@ impl PPU {
     }
 
     pub fn reset(&mut self) {
+        self.resetting = true;
+        self.even_frame = true;
         self.ctrl_high_register = 0;
         self.mask_register = 0;
-        self.oam_addr = 0;
-        self.oam_table = [0; 256];
         self.scan_line = -1;
         self.tick = 0;
         self.nmi_requested = false;
         self.even_frame = true;
         self.write_toggle = false;
         self.vram_address = VramAddress::new();
-        self.temporary_vram_address = VramAddress::new();
         self.bg_shift_registers = BGShiftRegisterSet::new();
-
         self.bus_request = BusRequest::None;
+
+        // ** unchanged by reset
+        // ppu_status
+        // oam_addr
+        // vram_address (but temp is cleared)
+        // oam_table
+        // palette_table
     }
 
     fn manage_bus_request(&mut self) {
@@ -148,6 +156,7 @@ impl PPU {
         match (self.scan_line, self.tick) {
             (-1, 1) => {
                 self.status_register = 0; // clear StatusFlag::VerticalBlank, StatusFlag::Sprite0Hit, and StatusFlag::SpriteOverflow
+                self.resetting = false; //
             }
             (241, 1) => {
                 self.set_status_flag(StatusFlag::VerticalBlank, true);
@@ -244,7 +253,7 @@ impl PPU {
             let bg_color = if self.read_mask_flag(MaskFlag::ShowBG)
                 && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG))
             {
-                let pallette_address = self.bg_shift_registers.get_pallette_address(
+                let palette_address = self.bg_shift_registers.get_palette_address(
                     false,
                     x,
                     self.temporary_vram_address.fine_x,
@@ -257,7 +266,7 @@ impl PPU {
                 || ++------ Value (voltage, determines NTSC/PAL luma)
                 ++--------- Unimplemented, reads back as 0
                 */
-                self.read_pallette(pallette_address)
+                self.read_palette(palette_address)
             } else {
                 0
             };
@@ -297,7 +306,7 @@ impl PPU {
         }
     }
 
-    fn read_pallette(&self, addr: u16) -> u8 {
+    fn read_palette(&self, addr: u16) -> u8 {
         let mirrored = addr & PALETTE_MASK;
 
         // 10/14/18/1C are mapped to 00/04/08/0C
@@ -307,7 +316,7 @@ impl PPU {
             mirrored
         };
 
-        let data = self.pallettes[physical as usize];
+        let data = self.palettes[physical as usize];
         // greyscale mode asks off the low bits
         if self.read_mask_flag(MaskFlag::Greyscale) {
             data & 0b00110000
@@ -316,7 +325,7 @@ impl PPU {
         }
     }
 
-    fn write_pallette(&mut self, addr: u16, data: u8) -> u8 {
+    fn write_palette(&mut self, addr: u16, data: u8) -> u8 {
         let mirrored = addr & PALETTE_MASK;
 
         // 10/14/18/1C are mapped to 00/04/08/0C
@@ -325,8 +334,8 @@ impl PPU {
         } else {
             mirrored
         };
-        let old = self.pallettes[physical as usize];
-        self.pallettes[physical as usize] = data & 0b00111111;
+        let old = self.palettes[physical as usize];
+        self.palettes[physical as usize] = data & 0b00111111;
         old
     }
 
@@ -346,8 +355,10 @@ impl PPU {
 
     fn set_ctrl_flags(&mut self, data: u8) -> u8 {
         let old = self.get_ctrl_flags();
-        self.ctrl_high_register = data & 0b11111100;
-        self.temporary_vram_address.set_nametable_bits(data);
+        if !self.resetting {
+            self.ctrl_high_register = data & 0b11111100;
+            self.temporary_vram_address.set_nametable_bits(data);
+        }
         old
     }
 
@@ -418,11 +429,11 @@ impl BusDevice for PPU {
                 0x2007 => {
                     let addr = self.vram_address.register;
                     let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
-                        self.read_pallette(addr)
+                        self.read_palette(addr)
                     } else {
                         self.data_buffer
                     };
-                    // vram is read even when in pallette address range
+                    // vram is read even when in palette address range
                     self.bus_request = BusRequest::Read(addr);
 
                     self.inc_vram_addr();
@@ -453,7 +464,9 @@ impl BusDevice for PPU {
                 }
                 0x2001 => {
                     let old = self.mask_register;
-                    self.mask_register = data;
+                    if !self.resetting {
+                        self.mask_register = data;
+                    }
                     old
                 }
                 0x2002 => 0,
@@ -472,29 +485,37 @@ impl BusDevice for PPU {
                     old
                 }
                 0x2005 => {
-                    if !self.write_toggle {
-                        self.write_toggle = true;
-                        self.temporary_vram_address.set_x(data)
+                    if !self.resetting {
+                        if !self.write_toggle {
+                            self.write_toggle = true;
+                            self.temporary_vram_address.set_x(data)
+                        } else {
+                            self.write_toggle = false;
+                            self.temporary_vram_address.set_y(data)
+                        }
                     } else {
-                        self.write_toggle = false;
-                        self.temporary_vram_address.set_y(data)
+                        0
                     }
                 }
                 0x2006 => {
-                    if !self.write_toggle {
-                        self.write_toggle = true;
-                        self.temporary_vram_address.set_address_high(data)
+                    if !self.resetting {
+                        if !self.write_toggle {
+                            self.write_toggle = true;
+                            self.temporary_vram_address.set_address_high(data)
+                        } else {
+                            self.write_toggle = false;
+                            let result = self.temporary_vram_address.set_address_low(data);
+                            self.vram_address.register = self.temporary_vram_address.register;
+                            result
+                        }
                     } else {
-                        self.write_toggle = false;
-                        let result = self.temporary_vram_address.set_address_low(data);
-                        self.vram_address.register = self.temporary_vram_address.register;
-                        result
+                        0
                     }
                 }
                 0x2007 => {
                     let addr = self.vram_address.register;
                     let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
-                        self.write_pallette(addr, data)
+                        self.write_palette(addr, data)
                     } else {
                         let old = self.data_buffer;
                         self.bus_request = BusRequest::Write(addr, data);
@@ -524,6 +545,7 @@ pub fn create_test_configuration() -> (PPU, Rc<RefCell<crate::ram::RAM>>) {
     use crate::ram::RAM;
 
     let mut ppu = PPU::new(PPU::nul_renderer());
+    ppu.resetting = false;
     let mem = Rc::new(RefCell::new(RAM::new(0x0000, 0xFFFF, 0xFFFF)));
     ppu.add_device(mem.clone());
     (ppu, mem)
@@ -893,16 +915,16 @@ impl BGShiftRegisterSet {
      * |||||||| +++--------- doesn't matter, effectively set to 0 by mirroring
      * ++++++++------------- 0x3F00 - 0x3FFF
      */
-    fn get_pallette_address(&self, sprite: bool, x: u16, fine_x: u8) -> u16 {
+    fn get_palette_address(&self, sprite: bool, x: u16, fine_x: u8) -> u16 {
         let pixel_color_number = self.get_pixel_color_number(x, fine_x);
 
-        let pallette_number = if pixel_color_number == 0 {
+        let palette_number = if pixel_color_number == 0 {
             0
         } else {
             self.get_pallete_number(x, fine_x)
         };
 
-        0x3F00 | if sprite { 0b10000 } else { 0 } | (pallette_number << 2) | pixel_color_number
+        0x3F00 | if sprite { 0b10000 } else { 0 } | (palette_number << 2) | pixel_color_number
     }
 }
 
@@ -919,8 +941,8 @@ enum BusRequest {
 
 /*
  7654 3210
- |||| ||++- 1-0: pallette number for top left quadrant of this meta tile
- |||| ++--- 3-2: pallette number for top right quadrant of this meta tile
- ||++------ 5-4: pallette number for bottom left quadrant of this meta tile
- ++-------- 7-6: pallette number for bottom right quadrant of this meta tile
+ |||| ||++- 1-0: palette number for top left quadrant of this meta tile
+ |||| ++--- 3-2: palette number for top right quadrant of this meta tile
+ ||++------ 5-4: palette number for bottom left quadrant of this meta tile
+ ++-------- 7-6: palette number for bottom right quadrant of this meta tile
 */
