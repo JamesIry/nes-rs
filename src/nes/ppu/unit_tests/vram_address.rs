@@ -115,3 +115,40 @@ fn test_vram_address_attribute_table() {
     assert_eq!(0b0101100010000110, reg.register);
     assert_eq!(0b0010101111001001, reg.get_attribute_address());
 }
+
+#[test]
+fn test_attribute_shift() {
+    let mut addr = VramAddress::new();
+
+    for y in 0..16 {
+        addr.set_y(y);
+        for x in 0..16 {
+            addr.set_x(x);
+            assert_eq!(0, addr.get_attribute_shift());
+        }
+    }
+
+    for y in 0..16 {
+        addr.set_y(y);
+        for x in 16..32 {
+            addr.set_x(x);
+            assert_eq!(2, addr.get_attribute_shift());
+        }
+    }
+
+    for y in 16..32 {
+        addr.set_y(y);
+        for x in 0..16 {
+            addr.set_x(x);
+            assert_eq!(4, addr.get_attribute_shift());
+        }
+    }
+
+    for y in 16..32 {
+        addr.set_y(y);
+        for x in 16..32 {
+            addr.set_x(x);
+            assert_eq!(6, addr.get_attribute_shift());
+        }
+    }
+}

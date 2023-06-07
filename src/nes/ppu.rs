@@ -189,6 +189,7 @@ impl PPU {
     fn manage_shift_registers(&mut self) {
         let name_table_address = self.vram_address.get_nametable_address();
         let attribute_address = self.vram_address.get_attribute_address();
+        let attribute_shift = self.vram_address.get_attribute_shift();
         let pattern_address = self.bg_shift_registers.get_pattern_address(
             self.read_ctrl_flag(CtrlFlag::BackgroundPatternHigh),
             self.vram_address.get_fine_y(),
@@ -206,7 +207,7 @@ impl PPU {
                 3 if self.tick != 339 => self.bus_request = BusRequest::Read(attribute_address),
                 4 if self.tick != 340 => self
                     .bg_shift_registers
-                    .load_attribute_data(self.data_buffer),
+                    .load_attribute_data(self.data_buffer, attribute_shift),
 
                 3 if self.tick == 339 => self.bus_request = BusRequest::Read(name_table_address),
                 4 if self.tick == 340 => self
@@ -246,7 +247,6 @@ impl PPU {
                 let pallette_address = self.bg_shift_registers.get_pallette_address(
                     false,
                     x,
-                    y,
                     self.temporary_vram_address.fine_x,
                 );
 
@@ -730,6 +730,21 @@ impl VramAddress {
             ((self.register >> 4) & 0b0000000000111000) | // high 3 bits of coarse Y
             ((self.register >> 2) & 0b0000000000000111) // high 3 bits of coarse X
     }
+
+    /**
+     * Attribute data is in "meta tiles", which are 4x4 arrangements of 8x8 tiles,
+     * i.e. 32x32 pixels. Metatiles are divided into 4 16x16 quadrants. Upper left is 0,
+     * upper right is 1, lower left is 2, and lower right is 3.
+     * Upper left needs no shifting, upper right needs 2, lower left needs 4,
+     * and lower right needs 6.
+     */
+    fn compute_attribute_shift(x: u8, y: u8) -> u8 {
+        ((y >> 2) & 0b100) | ((x >> 3) & 0b010)
+    }
+
+    fn get_attribute_shift(&self) -> u8 {
+        VramAddress::compute_attribute_shift(self.get_x(), self.get_y())
+    }
 }
 
 struct BGShiftRegister {
@@ -760,13 +775,36 @@ impl BGShiftRegister {
             1
         }
     }
+}
 
-    fn current_byte(&self) -> u8 {
-        (self.data >> 8) as u8
+struct BGShiftRegisterPair {
+    high: BGShiftRegister,
+    low: BGShiftRegister,
+}
+
+impl BGShiftRegisterPair {
+    fn new() -> Self {
+        Self {
+            high: BGShiftRegister::new(),
+            low: BGShiftRegister::new(),
+        }
+    }
+    fn load_high(&mut self, data: u8) {
+        self.high.load(data);
     }
 
-    fn staged_byte(&self) -> u8 {
-        (self.data & 0b0000000011111111) as u8
+    fn load_low(&mut self, data: u8) {
+        self.low.load(data);
+    }
+
+    fn shift(&mut self) {
+        self.high.shift();
+        self.low.shift();
+    }
+
+    fn bits(&self, x: u16, fine_x: u8) -> u16 {
+        let x_offset = fine_x.wrapping_add((x & 0b111) as u8);
+        self.high.bit(x_offset) << 1 | self.low.bit(x_offset)
     }
 }
 
@@ -774,16 +812,13 @@ struct BGShiftRegisterSet {
     /**
      * High and low bits for 2 bit pairs of color indices for each tile
      */
-    pattern_data_high: BGShiftRegister,
-    pattern_data_low: BGShiftRegister,
-    /*
-     7654 3210
-     |||| ||++- 1-0: pallette number for top left quadrant of this meta tile
-     |||| ++--- 3-2: pallette number for top right quadrant of this meta tile
-     ||++------ 5-4: pallette number for bottom left quadrant of this meta tile
-     ++-------- 7-6: pallette number for bottom right quadrant of this meta tile
-    */
-    attribute_data: BGShiftRegister,
+    pattern_data: BGShiftRegisterPair,
+
+    /**
+     * High and low bits for 2 bit pairs of pallet number for each tile
+     */
+    attribute_data: BGShiftRegisterPair,
+
     /*
      RRRR CCCC
      |||| ++++-------- tile column in pattern table
@@ -795,33 +830,35 @@ struct BGShiftRegisterSet {
 impl BGShiftRegisterSet {
     fn new() -> Self {
         Self {
-            pattern_data_high: BGShiftRegister::new(),
-            pattern_data_low: BGShiftRegister::new(),
-            attribute_data: BGShiftRegister::new(),
+            pattern_data: BGShiftRegisterPair::new(),
+            attribute_data: BGShiftRegisterPair::new(),
             name_table_data: 0,
         }
     }
 
     fn shift(&mut self) {
-        self.pattern_data_high.shift();
-        self.pattern_data_low.shift();
+        self.pattern_data.shift();
         self.attribute_data.shift();
     }
 
     fn load_pattern_data_high(&mut self, data: u8) {
-        self.pattern_data_high.load(data);
+        self.pattern_data.load_high(data);
     }
 
     fn load_pattern_data_low(&mut self, data: u8) {
-        self.pattern_data_low.load(data);
+        self.pattern_data.load_low(data);
     }
 
     fn load_name_table_data(&mut self, data: u8) {
         self.name_table_data = data;
     }
 
-    fn load_attribute_data(&mut self, data: u8) {
-        self.attribute_data.load(data);
+    fn load_attribute_data(&mut self, data: u8, attribute_data_shift: u8) {
+        let bits = (data >> attribute_data_shift) & 0b11;
+        self.attribute_data
+            .load_high(if bits & 0b10 != 0 { 0xFF } else { 0 });
+        self.attribute_data
+            .load_low(if bits & 0b01 != 0 { 0xFF } else { 0 });
     }
 
     fn get_pattern_address(&self, background_high: bool, fine_y: u8) -> u16 {
@@ -839,29 +876,12 @@ impl BGShiftRegisterSet {
             | ((fine_y & 0b00000111) as u16)
     }
 
-    /**
-     * Attribute data is in "meta tiles", which are 4x4 arrangements of 8x8 tiles,
-     * i.e. 32x32 pixels. Metatiles are divided into 4 16x16 quadrants. Upper left is 0,
-     * upper right is 1, lower left is 2, and lower right is 3.
-     * Upper left needs no shifting, upper right needs 2, lower left needs 4,
-     * and lower right needs 6.
-     */
-    fn get_attribute_shift(x: u16, y: u16) -> u16 {
-        ((y >> 2) & 0b100) | ((x >> 3) & 0b010)
-    }
-
     fn get_pixel_color_number(&self, x: u16, fine_x: u8) -> u16 {
-        let x_offset = fine_x.wrapping_add((x & 0b111) as u8);
-        (self.pattern_data_high.bit(x_offset) << 1) | self.pattern_data_low.bit(x_offset)
+        self.pattern_data.bits(x, fine_x)
     }
 
-    fn get_pallete_number(&self, x: u16, y: u16, fine_x: u8) -> u8 {
-        let attribute_entry = if (x % 8).wrapping_add(fine_x as u16) < 8 {
-            self.attribute_data.current_byte()
-        } else {
-            self.attribute_data.staged_byte()
-        };
-        (attribute_entry >> BGShiftRegisterSet::get_attribute_shift(x, y)) & 0b11
+    fn get_pallete_number(&self, x: u16, fine_x: u8) -> u16 {
+        self.attribute_data.bits(x, fine_x)
     }
 
     /**
@@ -873,19 +893,16 @@ impl BGShiftRegisterSet {
      * |||||||| +++--------- doesn't matter, effectively set to 0 by mirroring
      * ++++++++------------- 0x3F00 - 0x3FFF
      */
-    fn get_pallette_address(&self, sprite: bool, x: u16, y: u16, fine_x: u8) -> u16 {
+    fn get_pallette_address(&self, sprite: bool, x: u16, fine_x: u8) -> u16 {
         let pixel_color_number = self.get_pixel_color_number(x, fine_x);
 
         let pallette_number = if pixel_color_number == 0 {
             0
         } else {
-            self.get_pallete_number(x, y, fine_x)
+            self.get_pallete_number(x, fine_x)
         };
 
-        0x3F00
-            | if sprite { 0b10000 } else { 0 }
-            | (pallette_number << 2) as u16
-            | pixel_color_number
+        0x3F00 | if sprite { 0b10000 } else { 0 } | (pallette_number << 2) | pixel_color_number
     }
 }
 
@@ -899,3 +916,11 @@ enum BusRequest {
     Write(u16, u8),
     None,
 }
+
+/*
+ 7654 3210
+ |||| ||++- 1-0: pallette number for top left quadrant of this meta tile
+ |||| ++--- 3-2: pallette number for top right quadrant of this meta tile
+ ||++------ 5-4: pallette number for bottom left quadrant of this meta tile
+ ++-------- 7-6: pallette number for bottom right quadrant of this meta tile
+*/
