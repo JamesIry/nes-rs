@@ -59,6 +59,9 @@ fn test_dma() {
 
     for address in 0..0x0100 {
         let data = (address as u8).wrapping_sub(0x02) as usize;
-        assert_eq!(data as u8, ppu.as_ref().borrow_mut().oam_table[address]);
+        assert_eq!(
+            data as u8,
+            ppu.as_ref().borrow_mut().primary_oam.table[address]
+        );
     }
 }

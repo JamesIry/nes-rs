@@ -87,16 +87,16 @@ fn test_read_from_write() {
 fn test_oam_registers() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
-    assert_eq!(ppu.oam_table, [0; 256]);
+    assert_eq!(ppu.primary_oam.table, [0; 256]);
 
     ppu.write(0x2003, 0x42);
     ppu.write(0x2004, 0x12);
     ppu.write(0x2004, 0x34);
 
-    assert_eq!(0x00, ppu.oam_table[0x41]);
-    assert_eq!(0x12, ppu.oam_table[0x42]);
-    assert_eq!(0x34, ppu.oam_table[0x43]);
-    assert_eq!(0x00, ppu.oam_table[0x44]);
+    assert_eq!(0x00, ppu.primary_oam.table[0x41]);
+    assert_eq!(0x12, ppu.primary_oam.table[0x42]);
+    assert_eq!(0x34, ppu.primary_oam.table[0x43]);
+    assert_eq!(0x00, ppu.primary_oam.table[0x44]);
 
     ppu.write(0x2003, 0x42);
     assert_eq!(Some(0x12), ppu.read(0x2004));

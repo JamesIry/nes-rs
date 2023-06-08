@@ -22,7 +22,8 @@ const PALETTE_START: u16 = 0x3000;
 const PALETTE_END: u16 = 0xFFFF;
 const PALETTE_SIZE: usize = 0x0020;
 const PALETTE_MASK: u16 = 0x001F;
-const OAM_SIZE: usize = 0x0100;
+const PRIMARY_OAM_SIZE: usize = 0x0100;
+const SECONDARY_OAM_SIZE: usize = 0x0020;
 
 // blargg's power on palette values. why not?
 const INITIAL_PALETTE_VALUES: [u8; PALETTE_SIZE] = [
@@ -39,10 +40,12 @@ pub struct PPU {
     ctrl_high_register: u8,
     mask_register: u8,
     status_register: u8,
-    oam_addr: u8,
 
     bus: Bus,
-    oam_table: [u8; OAM_SIZE],
+
+    primary_oam: OAMData<PRIMARY_OAM_SIZE>,
+    secondary_oam: OAMData<SECONDARY_OAM_SIZE>,
+
     palettes: [u8; PALETTE_SIZE],
     scan_line: i16,
     tick: u16,
@@ -55,6 +58,8 @@ pub struct PPU {
     temporary_vram_address: VramAddress,
 
     bg_shift_registers: BGShiftRegisterSet,
+    oam_buffer: u8,
+    sprite_eval_state: SpriteEvalState,
 
     bus_request: BusRequest,
     data_buffer: u8,
@@ -73,11 +78,11 @@ impl PPU {
             resetting: true,
             renderer,
             bus: Bus::new(),
-            oam_table: [0; OAM_SIZE],
+            primary_oam: OAMData::new(),
+            secondary_oam: OAMData::new(),
             ctrl_high_register: 0,
             mask_register: 0,
             status_register: StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow,
-            oam_addr: 0,
             palettes: INITIAL_PALETTE_VALUES,
             scan_line: -1,
             tick: 0,
@@ -88,6 +93,8 @@ impl PPU {
             write_toggle: false,
 
             bg_shift_registers: BGShiftRegisterSet::new(),
+            oam_buffer: 0,
+            sprite_eval_state: SpriteEvalState::ReadY,
 
             data_buffer: 0,
             bus_request: BusRequest::None,
@@ -99,6 +106,7 @@ impl PPU {
         self.manage_bus_request();
         self.manage_status();
         if self.rendering_enabled() && self.scan_line < 240 {
+            self.manage_sprite_evaluation();
             self.manage_shift_registers();
             self.manage_render();
             self.manage_scrolling();
@@ -131,9 +139,8 @@ impl PPU {
 
         // ** unchanged by reset
         // ppu_status
-        // oam_addr
+        // oam_data
         // vram_address (but temp is cleared)
-        // oam_table
         // palette_table
     }
 
@@ -192,6 +199,131 @@ impl PPU {
             (_, 328) => self.vram_address.increment_coarse_x(),
             (_, 336) => self.vram_address.increment_coarse_x(),
             _ => (),
+        }
+    }
+
+    #[allow(clippy::manual_range_contains)]
+    fn manage_sprite_evaluation(&mut self) {
+        if self.scan_line < 0 {
+            return;
+        }
+
+        match self.tick {
+            0 => {
+                self.primary_oam.load_addr(0);
+                self.primary_oam.read_enabled = false;
+                self.primary_oam.write_enabled = false;
+
+                self.secondary_oam.load_addr(0);
+                self.secondary_oam.write_enabled = true;
+            }
+            t if 1 <= t && t <= 64 => {
+                match t % 2 {
+                    1 => {
+                        self.oam_buffer = self.primary_oam.read_data();
+                        self.primary_oam.inc_addr();
+                    }
+                    0 => {
+                        self.secondary_oam.write_data(self.oam_buffer);
+                        self.secondary_oam.inc_addr();
+                    }
+                    _ => unreachable!("tick was neither even nor odd"),
+                };
+            }
+            t if 65 <= t && t <= 256 => {
+                if t == 65 {
+                    self.primary_oam.read_enabled = true;
+                    self.sprite_eval_state = SpriteEvalState::ReadY;
+                }
+
+                // 192 cycles to work with
+                // the minimum is 64 reads then writes of y, so 128 cycles.
+                // At most 9 of them will match (8 "real" and 1 "overflow")
+                // and require 6 additional cycles each, so 54 additional cycles.
+                // Total is 182.
+                // There are 10 cycles I can't account for. Just "extras?"
+                match self.sprite_eval_state {
+                    SpriteEvalState::ReadY => {
+                        self.oam_buffer = self.primary_oam.read_data();
+                        self.primary_oam.inc_addr();
+                        self.sprite_eval_state = SpriteEvalState::WriteCompareY;
+                    }
+                    SpriteEvalState::WriteCompareY => {
+                        let y = self.oam_buffer as i16;
+                        self.secondary_oam.write_data(self.oam_buffer);
+                        self.secondary_oam.inc_addr();
+                        let sprite_height = if self.read_ctrl_flag(CtrlFlag::SpriteSizeLarge) {
+                            16
+                        } else {
+                            8
+                        };
+
+                        if y <= self.scan_line
+                            && self.scan_line < y + sprite_height
+                            && !self.read_status_flag(StatusFlag::SpriteOverflow)
+                        {
+                            if !self.secondary_oam.write_enabled {
+                                self.set_status_flag(StatusFlag::SpriteOverflow, true);
+                            }
+                            self.sprite_eval_state = SpriteEvalState::ReadTileIndex;
+                        } else {
+                            // skip over the tile, attribute, and x data since y didn't match
+                            self.primary_oam.inc_addr();
+                            self.primary_oam.inc_addr();
+                            self.primary_oam.inc_addr();
+
+                            // this "extra increment" is what causes the famous sprite
+                            // overflow bug. Triggered when write is disabled, i.e we've
+                            // found 8 renderable sprites but, to get here, haven't found
+                            // an overflow sprite yet
+                            if !self.secondary_oam.write_enabled {
+                                self.primary_oam.inc_addr();
+                            }
+                            self.sprite_eval_state = SpriteEvalState::ReadY;
+                        }
+                    }
+                    SpriteEvalState::ReadTileIndex => {
+                        self.oam_buffer = self.primary_oam.read_data();
+                        self.primary_oam.inc_addr();
+                        self.sprite_eval_state = SpriteEvalState::WriteTileIndex;
+                    }
+                    SpriteEvalState::WriteTileIndex => {
+                        self.secondary_oam.write_data(self.oam_buffer);
+                        self.secondary_oam.inc_addr();
+                        self.sprite_eval_state = SpriteEvalState::ReadAttributes;
+                    }
+                    SpriteEvalState::ReadAttributes => {
+                        self.oam_buffer = self.primary_oam.read_data();
+                        self.primary_oam.inc_addr();
+                        self.sprite_eval_state = SpriteEvalState::WriteTileAttributes;
+                    }
+                    SpriteEvalState::WriteTileAttributes => {
+                        self.secondary_oam.write_data(self.oam_buffer);
+                        self.secondary_oam.inc_addr();
+                        self.sprite_eval_state = SpriteEvalState::ReadX;
+                    }
+                    SpriteEvalState::ReadX => {
+                        self.oam_buffer = self.primary_oam.read_data();
+                        self.primary_oam.inc_addr();
+                        self.sprite_eval_state = SpriteEvalState::WriteX;
+                    }
+                    SpriteEvalState::WriteX => {
+                        self.secondary_oam.write_data(self.oam_buffer);
+                        if self.secondary_oam.is_full() {
+                            self.secondary_oam.write_enabled = false;
+                        }
+                        self.secondary_oam.inc_addr();
+                        self.sprite_eval_state = SpriteEvalState::ReadY;
+                    }
+                }
+            }
+            257 => {
+                self.primary_oam.load_addr(0);
+                self.primary_oam.write_enabled = true;
+                self.secondary_oam.load_addr(0);
+            }
+            t if 258 <= t && t <= 340 => {}
+            _ => unreachable!("Unreachable tick number {}", self.tick),
         }
     }
 
@@ -423,7 +555,7 @@ impl BusDevice for PPU {
                     result
                 }
                 0x2003 => self.data_buffer,
-                0x2004 => self.oam_table[self.oam_addr as usize],
+                0x2004 => self.primary_oam.read_data(),
                 0x2005 => self.data_buffer,
                 0x2006 => self.data_buffer,
                 0x2007 => {
@@ -470,18 +602,10 @@ impl BusDevice for PPU {
                     old
                 }
                 0x2002 => 0,
-                0x2003 => {
-                    let old = self.oam_addr;
-                    self.oam_addr = data;
-                    old
-                }
+                0x2003 => self.primary_oam.load_addr(data),
                 0x2004 => {
-                    let old = self.oam_table[self.oam_addr as usize];
-                    if self.scan_line >= 240 || !self.rendering_enabled() {
-                        self.oam_table[self.oam_addr as usize] = data;
-                    }
-
-                    self.oam_addr = self.oam_addr.wrapping_add(1);
+                    let old = self.primary_oam.write_data(data);
+                    self.primary_oam.inc_addr();
                     old
                 }
                 0x2005 => {
@@ -530,14 +654,6 @@ impl BusDevice for PPU {
             None
         }
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct OAMData {
-    sprite_y: u8,
-    sprite_tile: u8,
-    sprite_attribute: u8,
-    sprite_x: u8,
 }
 
 #[cfg(test)]
@@ -896,6 +1012,7 @@ impl BGShiftRegisterSet {
         (if background_high { 0x1000 } else { 0x0000 })
             | ((self.name_table_data as u16) << 4)
             | ((fine_y & 0b00000111) as u16)
+        // the "bit plane" is set to 1 by the pattern data fetching code as needed
     }
 
     fn get_pixel_color_number(&self, x: u16, fine_x: u8) -> u16 {
@@ -939,10 +1056,63 @@ enum BusRequest {
     None,
 }
 
-/*
- 7654 3210
- |||| ||++- 1-0: palette number for top left quadrant of this meta tile
- |||| ++--- 3-2: palette number for top right quadrant of this meta tile
- ||++------ 5-4: palette number for bottom left quadrant of this meta tile
- ++-------- 7-6: palette number for bottom right quadrant of this meta tile
-*/
+struct OAMData<const SIZE: usize> {
+    addr: u8,
+    table: [u8; SIZE],
+    read_enabled: bool,
+    write_enabled: bool,
+    addr_mask: u8,
+}
+
+impl<const SIZE: usize> OAMData<SIZE> {
+    fn new() -> Self {
+        Self {
+            addr: 0,
+            table: [0; SIZE],
+            read_enabled: true,
+            write_enabled: true,
+            addr_mask: (SIZE - 1) as u8,
+        }
+    }
+
+    fn load_addr(&mut self, addr: u8) -> u8 {
+        let old = self.addr;
+        self.addr = addr & self.addr_mask;
+        old
+    }
+
+    fn inc_addr(&mut self) {
+        self.addr = self.addr.wrapping_add(1) & self.addr_mask;
+    }
+
+    fn is_full(&self) -> bool {
+        (self.addr as usize) + 1 == SIZE
+    }
+
+    fn write_data(&mut self, data: u8) -> u8 {
+        let old = self.table[self.addr as usize];
+        if self.write_enabled {
+            self.table[self.addr as usize] = data;
+        }
+        old
+    }
+
+    fn read_data(&self) -> u8 {
+        if self.read_enabled {
+            self.table[self.addr as usize]
+        } else {
+            0xFF
+        }
+    }
+}
+
+enum SpriteEvalState {
+    ReadY,
+    WriteCompareY,
+    ReadTileIndex,
+    WriteTileIndex,
+    ReadAttributes,
+    WriteTileAttributes,
+    ReadX,
+    WriteX,
+}
