@@ -235,7 +235,9 @@ impl PPU {
             }
             t if 65 <= t && t <= 256 => {
                 if t == 65 {
+                    self.primary_oam.load_addr(0);
                     self.primary_oam.read_enabled = true;
+                    self.secondary_oam.set_current_sprite(0);
                     self.sprite_eval_state = SpriteEvalState::ReadY;
                 }
 
@@ -444,53 +446,69 @@ impl PPU {
         let y = self.scan_line as u16;
 
         if x < 256 && y < 240 {
-            let mut bg_address = {
+            let (mut bg_palette, mut bg_color) = {
                 self.bg_shift_registers
-                    .get_palette_address(self.temporary_vram_address.fine_x)
+                    .get_palette_number_and_color(self.temporary_vram_address.fine_x)
             };
 
-            let (sprite_number, mut sprite_address, priority) = {
+            let (sprite_number, mut sprite_palette, mut sprite_color, bg_priority) = {
                 if let Some((sprite_number, sprite)) = self.sprite_row_data.first_live() {
-                    let palette_address = sprite.get_palette_address();
-                    (sprite_number, palette_address, sprite.get_priority())
+                    let (palette_number, color) = sprite.get_palette_number_and_color();
+                    (
+                        sprite_number,
+                        palette_number,
+                        color,
+                        sprite.get_bg_priority(),
+                    )
                 } else {
-                    (0, 0x3F10, true)
+                    (0, 0, 0, true)
                 }
             };
 
-            if bg_address != 0x3F00 && sprite_address != 0x3F10 && sprite_number == 0 {
+            if bg_color != 0 && sprite_color != 0 && sprite_number == 0 {
                 self.status_register |= StatusFlag::Sprite0Hit;
             }
 
             if !(self.read_mask_flag(MaskFlag::ShowBG)
                 && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG)))
             {
-                println!("erasing bg");
-                bg_address = 0x3F00;
+                bg_palette = 0;
+                bg_color = 0;
             }
             if !(self.read_mask_flag(MaskFlag::ShowSprites)
                 && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8Sprites)))
             {
-                println!("erasing sp");
-                sprite_address = 0x3F10;
+                sprite_palette = 0b0100;
+                sprite_color = 0;
             }
 
-            let palette_address = match (bg_address, sprite_address, priority) {
-                (0x3F00, 0x3F10, _) => 0x3F00,
-                (0x3F00, s, _) => s,
-                (b, 0x3F10, _) => b,
-                (_, s, true) => s,
-                (b, _, false) => b,
+            let (palette_number, color) = match (bg_color, sprite_color, bg_priority) {
+                (0, 0, _) => (0, 0),
+                (0, s, _) => (sprite_palette, s),
+                (b, 0, _) => (bg_palette, b),
+                (_, s, false) => (sprite_palette, s),
+                (b, _, true) => (bg_palette, b),
             };
+
+            /*
+             * 00111111 xxx 1 PP CC
+             * |||||||| ||| | || ||
+             * |||||||| ||| | || ++- Color number from tile data
+             * |||||||| ||| | ++---- Palette number from attribute table or OAM
+             * |||||||| ||| +------- Background/Sprite select, 0=bg, 1=sprite
+             * |||||||| +++--------- doesn't matter, effectively set to 0 by mirroring
+             * ++++++++------------- 0x3F00 - 0x3FFF
+             */
+            let palette_address = 0x3F00 | (palette_number << 2) | color;
 
             const SHOW_GRID: bool = false;
 
             /*
-            00 VV HHHH
-            || || ||||
-            || || ++++- Hue (phase, determines NTSC/PAL chroma)
-            || ++------ Value (voltage, determines NTSC/PAL luma)
-            ++--------- Unimplemented, reads back as 0
+             * 00 VV HHHH
+             * || || ||||
+             * || || ++++- Hue (phase, determines NTSC/PAL chroma)
+             * || ++------ Value (voltage, determines NTSC/PAL luma)
+             ++--------- Unimplemented, reads back as 0
             */
             let color = self.read_palette(palette_address);
 
@@ -1119,16 +1137,7 @@ impl BGShiftRegisterSet {
         self.attribute_data.bits(fine_x)
     }
 
-    /**
-     * 00111111 xxx 0 PP CC
-     * |||||||| ||| | || ||
-     * |||||||| ||| | || ++- Color number from tile data
-     * |||||||| ||| | ++---- Palette number from attribute table or OAM
-     * |||||||| ||| +------- Background/Sprite select, 0=bg, 1=sprite
-     * |||||||| +++--------- doesn't matter, effectively set to 0 by mirroring
-     * ++++++++------------- 0x3F00 - 0x3FFF
-     */
-    fn get_palette_address(&self, fine_x: u8) -> u16 {
+    fn get_palette_number_and_color(&self, fine_x: u8) -> (u16, u16) {
         let pixel_color_number = self.get_pixel_color_number(fine_x);
 
         let palette_number = if pixel_color_number == 0 {
@@ -1137,7 +1146,7 @@ impl BGShiftRegisterSet {
             self.get_pallete_number(fine_x)
         };
 
-        0x3F00 | (palette_number << 2) | pixel_color_number
+        (palette_number, pixel_color_number)
     }
 }
 
@@ -1234,13 +1243,18 @@ impl SpriteRowData {
     }
 
     fn get_pattern_address(&self, large_sprite_mode: bool, sprite_high_mode: bool, y: u16) -> u16 {
-        let y_offset = y - (self.y as u16);
+        let mut y_offset = y - (self.y as u16);
 
         let sprite_high = if large_sprite_mode {
             y_offset > 7
         } else {
             sprite_high_mode
         };
+
+        if self.get_vertical_flip() {
+            let sprite_height = if large_sprite_mode { 16 } else { 8 };
+            y_offset = sprite_height - y_offset - 1;
+        }
 
         /*
         000 H RRRR CCCC P YYY
@@ -1258,16 +1272,7 @@ impl SpriteRowData {
         // the "bit plane" is set to 1 by the pattern data fetching code as needed
     }
 
-    /**
-     * 00111111 xxx 1 PP CC
-     * |||||||| ||| | || ||
-     * |||||||| ||| | || ++- Color number from tile data
-     * |||||||| ||| | ++---- Palette number from attribute table or OAM
-     * |||||||| ||| +------- Background/Sprite select, 0=bg, 1=sprite
-     * |||||||| +++--------- doesn't matter, effectively set to 0 by mirroring
-     * ++++++++------------- 0x3F00 - 0x3FFF
-     */
-    fn get_palette_address(&self) -> u16 {
+    fn get_palette_number_and_color(&self) -> (u16, u16) {
         let pixel_color_number = self.get_pixel_color_number();
         let palette_number = if pixel_color_number == 0 {
             0
@@ -1275,7 +1280,7 @@ impl SpriteRowData {
             self.get_pallete_number()
         };
 
-        0x3F10 | (palette_number << 2) | pixel_color_number
+        (0b0100 | palette_number, pixel_color_number)
     }
 
     fn get_pallete_number(&self) -> u16 {
@@ -1287,14 +1292,18 @@ impl SpriteRowData {
     }
 
     /**
-     * True - in front of bg, false - behind bg
+     * True - bg in front, false - bg behind
      */
-    fn get_priority(&self) -> bool {
-        self.attributes & 0b00100000 == 0
+    fn get_bg_priority(&self) -> bool {
+        self.attributes & 0b00100000 != 0
     }
 
     fn get_horizontal_flip(&self) -> bool {
         self.attributes & 0b01000000 != 0
+    }
+
+    fn get_vertical_flip(&self) -> bool {
+        self.attributes & 0b10000000 != 0
     }
 
     fn shift(&mut self) {
@@ -1328,8 +1337,11 @@ impl SpriteRowData {
     }
 
     fn reverse_byte(mut b: u8) -> u8 {
+        // 0123 4567 -> 4567 0123
         b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
+        // 45 67,01 23 -> 67 45,23 01
         b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
+        // 6 7,4 5,2 3,0 1 -> 7 6,5 4,3 2,1 0
         b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
         b
     }

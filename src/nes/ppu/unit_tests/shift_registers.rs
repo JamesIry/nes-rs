@@ -231,13 +231,12 @@ fn test_bg_shift_register_get_palette_address() {
     set.load_attribute_data(0b00010110, 0); // 10
     set.latch();
 
-    assert_eq!(0b0011111100000000, set.get_palette_address(0));
+    assert_eq!((0, 0), set.get_palette_number_and_color(0));
 
-
-    assert_eq!(0b0011111100000101, set.get_palette_address(1));
-    assert_eq!(0b0011111100000111, set.get_palette_address(5));
+    assert_eq!((1, 1), set.get_palette_number_and_color(1));
+    assert_eq!((1, 3), set.get_palette_number_and_color(5));
     for _ in 0..5 {
         set.shift();
     }
-    assert_eq!(0b0011111100000111, set.get_palette_address(0));
+    assert_eq!((1, 3), set.get_palette_number_and_color(0));
 }
