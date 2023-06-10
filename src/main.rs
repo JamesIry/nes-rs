@@ -1,8 +1,6 @@
 use anyhow::Result;
+use minifb::{Key, Scale, ScaleMode, Window, WindowOptions};
 use nes::{controllers::JoyPad, NES};
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
-use sdl2::pixels::Color;
 use std::collections::HashSet;
 use std::{
     cell::RefCell,
@@ -34,7 +32,12 @@ const CYCLES_PER_FRAME: u32 = 89489;
  */
 const NANOS_PER_FRAME: u64 = 33333333;
 
+const NES_WIDTH: usize = 256;
+const NES_HEIGHT: usize = 240;
+
 fn main() -> Result<()> {
+    let buffer = Rc::new(RefCell::new(vec![0; NES_WIDTH * NES_HEIGHT]));
+
     let args = env::args().collect::<Vec<String>>();
     let cartridge_name = if args.len() > 1 {
         &args[1]
@@ -42,39 +45,25 @@ fn main() -> Result<()> {
         "resources/test/nestest.nes"
     };
 
-    let sdl_context = sdl2::init().map_err(anyhow::Error::msg)?;
-    let video_subsystem = sdl_context.video().map_err(anyhow::Error::msg)?;
+    let opts = WindowOptions {
+        borderless: false,
+        scale: Scale::FitScreen,
+        title: true,
+        resize: true,
+        scale_mode: ScaleMode::AspectRatioStretch,
+        topmost: false,
+        transparency: false,
+        none: false,
+    };
 
-    let window = video_subsystem
-        .window("NES RS", 512, 480)
-        .position_centered()
-        .opengl()
-        .build()
-        .map_err(|e| e.to_string())
-        .map_err(anyhow::Error::msg)?;
+    let mut window = Window::new("NES RS", NES_WIDTH * 3, NES_HEIGHT * 3, opts)?;
+    let render_clone = buffer.clone();
 
-    let mut canvas = window
-        .into_canvas()
-        .build()
-        .map_err(|e| e.to_string())
-        .map_err(anyhow::Error::msg)?;
-
-    canvas.set_draw_color(Color::RGB(0, 0, 0));
-    canvas.clear();
-    canvas.present();
-    let canvas = Rc::new(RefCell::new(canvas));
-
-    let mut event_pump = sdl_context.event_pump().map_err(anyhow::Error::msg)?;
-
-    let render_clone = canvas.clone();
     let renderer = Box::new(move |x, y, r, g, b| {
-        let mut c = render_clone.as_ref().borrow_mut();
-        c.set_draw_color(Color::RGB(r, g, b));
-        for i in x * 2..=x * 2 + 1 {
-            for j in y * 2..=y * 2 + 1 {
-                c.draw_point((i as i32, j as i32)).unwrap()
-            }
-        }
+        let mut buffer = render_clone.as_ref().borrow_mut();
+        let color = (r as u32) << 16 | (g as u32) << 8 | (b as u32);
+        let (x, y) = (x as usize, y as usize);
+        buffer[y * NES_WIDTH + x] = color;
     });
 
     let mut nes = NES::new(renderer);
@@ -88,31 +77,17 @@ fn main() -> Result<()> {
     let start = Instant::now();
     let mut next_frame = start + frame_time;
     let mut frame = 0.0;
-    'running: loop {
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'running,
-                _ => (),
-            }
-        }
-        let keys: HashSet<Keycode> = event_pump
-            .keyboard_state()
-            .pressed_scancodes()
-            .filter_map(Keycode::from_scancode)
-            .collect();
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        let keys: HashSet<Key> = HashSet::from_iter(window.get_keys().into_iter());
 
-        let input: u8 = check_keycode(&keys, Keycode::W, JoyPadButton::Up)
-            | check_keycode(&keys, Keycode::A, JoyPadButton::Left)
-            | check_keycode(&keys, Keycode::S, JoyPadButton::Down)
-            | check_keycode(&keys, Keycode::D, JoyPadButton::Right)
-            | check_keycode(&keys, Keycode::J, JoyPadButton::A)
-            | check_keycode(&keys, Keycode::K, JoyPadButton::B)
-            | check_keycode(&keys, Keycode::Return, JoyPadButton::Start)
-            | check_keycode(&keys, Keycode::Backslash, JoyPadButton::Select);
+        let input: u8 = check_keycode(&keys, Key::W, JoyPadButton::Up)
+            | check_keycode(&keys, Key::A, JoyPadButton::Left)
+            | check_keycode(&keys, Key::S, JoyPadButton::Down)
+            | check_keycode(&keys, Key::D, JoyPadButton::Right)
+            | check_keycode(&keys, Key::J, JoyPadButton::A)
+            | check_keycode(&keys, Key::K, JoyPadButton::B)
+            | check_keycode(&keys, Key::Enter, JoyPadButton::Start)
+            | check_keycode(&keys, Key::Backslash, JoyPadButton::Select);
 
         joypad1.as_ref().borrow_mut().set_buttons(input);
 
@@ -121,16 +96,17 @@ fn main() -> Result<()> {
         }
         let now = Instant::now();
 
-        canvas.as_ref().borrow_mut().present();
+        window.update_with_buffer(&buffer.as_ref().borrow(), NES_WIDTH, NES_HEIGHT)?;
+
+        if now < next_frame {
+            thread::sleep(next_frame - now);
+        }
 
         const DISPLAY_FRAME_RATE: bool = false;
 
         if DISPLAY_FRAME_RATE {
             frame += 1.0;
 
-            if now < next_frame {
-                thread::sleep(next_frame - now);
-            }
             println!("Frames/sec: {}", frame / (now - start).as_secs_f32());
             next_frame += frame_time;
         }
@@ -139,7 +115,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn check_keycode(keys: &HashSet<Keycode>, key: Keycode, button: JoyPadButton) -> u8 {
+fn check_keycode(keys: &HashSet<Key>, key: Key, button: JoyPadButton) -> u8 {
     if keys.contains(&key) {
         0 | button
     } else {
