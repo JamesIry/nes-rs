@@ -6,7 +6,7 @@ use std::mem::swap;
 use std::rc::Rc;
 
 use crate::cpu::decode::decode;
-use crate::cpu::flags::Flag;
+use crate::cpu::flags::StatusFlags;
 use crate::cpu::instructions::Instruction;
 use crate::cpu::monitor::Monitor;
 use crate::cpu::{CPUType, CPU};
@@ -150,7 +150,7 @@ impl NestestMonitor {
             self.a,
             self.x,
             self.y,
-            self.status & (!Flag::Break),
+            self.status & (!StatusFlags::Break.bits()),
             self.sp,
             self.cycle * 3 / 341,
             self.cycle * 3 % 341,

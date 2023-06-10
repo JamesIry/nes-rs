@@ -11,7 +11,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::bus::{Bus, BusDevice};
 
 use self::{
-    flags::{CtrlFlag, MaskFlag, StatusFlag},
+    flags::{CtrlFlags, MaskFlags, StatusFlags},
     rgb::translate_nes_to_rgb,
 };
 
@@ -37,9 +37,9 @@ const INITIAL_PALETTE_VALUES: [u8; PALETTE_SIZE] = [
 #[allow(clippy::upper_case_acronyms)]
 pub struct PPU {
     renderer: Box<dyn FnMut(u16, u16, u8, u8, u8)>,
-    ctrl_high_register: u8,
-    mask_register: u8,
-    status_register: u8,
+    ctrl_high_register: CtrlFlags,
+    mask_register: MaskFlags,
+    status_register: StatusFlags,
 
     bus: Bus,
 
@@ -82,9 +82,9 @@ impl PPU {
             primary_oam: OAMData::new(),
             secondary_oam: OAMData::new(),
             sprite_row_data: SpriteRowSet::new(),
-            ctrl_high_register: 0,
-            mask_register: 0,
-            status_register: StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow,
+            ctrl_high_register: CtrlFlags::empty(),
+            mask_register: MaskFlags::empty(),
+            status_register: StatusFlags::VerticalBlank | StatusFlags::SpriteOverflow,
             palettes: INITIAL_PALETTE_VALUES,
             scan_line: -1,
             tick: 0,
@@ -118,7 +118,8 @@ impl PPU {
     }
 
     fn rendering_enabled(&self) -> bool {
-        self.mask_register & (MaskFlag::ShowBG | MaskFlag::ShowSprites) != 0
+        self.mask_register
+            .intersects(MaskFlags::ShowBG | MaskFlags::ShowSprites)
     }
 
     pub fn add_device(&mut self, device: Rc<RefCell<dyn BusDevice>>) {
@@ -128,8 +129,8 @@ impl PPU {
     pub fn reset(&mut self) {
         self.resetting = true;
         self.even_frame = true;
-        self.ctrl_high_register = 0;
-        self.mask_register = 0;
+        self.ctrl_high_register = CtrlFlags::empty();
+        self.mask_register = MaskFlags::empty();
         self.scan_line = -1;
         self.tick = 0;
         self.nmi_requested = false;
@@ -166,14 +167,14 @@ impl PPU {
         // manage status
         match (self.scan_line, self.tick) {
             (-1, 1) => {
-                self.status_register = 0; // clear StatusFlag::VerticalBlank, StatusFlag::Sprite0Hit, and StatusFlag::SpriteOverflow
+                self.status_register = StatusFlags::empty(); // clear StatusFlag::VerticalBlank, StatusFlag::Sprite0Hit, and StatusFlag::SpriteOverflow
                 self.resetting = false; //
                 self.primary_oam.write_enabled = false;
             }
             (241, 1) => {
-                self.set_status_flag(StatusFlag::VerticalBlank, true);
+                self.set_status_flag(StatusFlags::VerticalBlank, true);
                 self.primary_oam.write_enabled = true;
-                if self.read_ctrl_flag(CtrlFlag::NmiEnabled) {
+                if self.read_ctrl_flag(CtrlFlags::NmiEnabled) {
                     self.nmi_requested = true;
                 }
             }
@@ -259,7 +260,7 @@ impl PPU {
                     SpriteEvalState::WriteCompareY => {
                         let y = self.oam_buffer as i16;
                         self.secondary_oam.write_data(self.oam_buffer);
-                        let sprite_height = if self.read_ctrl_flag(CtrlFlag::SpriteSizeLarge) {
+                        let sprite_height = if self.read_ctrl_flag(CtrlFlags::SpriteSizeLarge) {
                             16
                         } else {
                             8
@@ -267,10 +268,10 @@ impl PPU {
 
                         if y <= self.scan_line
                             && self.scan_line < y + sprite_height
-                            && !self.read_status_flag(StatusFlag::SpriteOverflow)
+                            && !self.read_status_flag(StatusFlags::SpriteOverflow)
                         {
                             if !self.secondary_oam.write_enabled {
-                                self.set_status_flag(StatusFlag::SpriteOverflow, true);
+                                self.set_status_flag(StatusFlags::SpriteOverflow, true);
                             } else if self.primary_oam.addr < 4 {
                                 self.secondary_oam.has_sprite0 = true;
                             }
@@ -390,7 +391,7 @@ impl PPU {
                         }
                     } else {
                         let address = self.bg_shift_registers.get_pattern_address(
-                            self.read_ctrl_flag(CtrlFlag::BackgroundPatternHigh),
+                            self.read_ctrl_flag(CtrlFlags::BackgroundPatternHigh),
                             self.vram_address.get_fine_y(),
                         );
                         self.bus_request = BusRequest::Read(address);
@@ -417,7 +418,7 @@ impl PPU {
                         }
                     } else {
                         let address = self.bg_shift_registers.get_pattern_address(
-                            self.read_ctrl_flag(CtrlFlag::BackgroundPatternHigh),
+                            self.read_ctrl_flag(CtrlFlags::BackgroundPatternHigh),
                             self.vram_address.get_fine_y(),
                         ) | 0b00001000;
                         self.bus_request = BusRequest::Read(address);
@@ -450,8 +451,8 @@ impl PPU {
     }
 
     fn compute_base_sprite_pattern_address(&mut self) -> u16 {
-        let sprite_large_mode = self.read_ctrl_flag(CtrlFlag::SpriteSizeLarge);
-        let sprite_high_mode = self.read_ctrl_flag(CtrlFlag::SpriteTableHigh);
+        let sprite_large_mode = self.read_ctrl_flag(CtrlFlags::SpriteSizeLarge);
+        let sprite_high_mode = self.read_ctrl_flag(CtrlFlags::SpriteTableHigh);
         let result = self.sprite_row_data.current_sprite().get_pattern_address(
             sprite_large_mode,
             sprite_high_mode,
@@ -486,17 +487,17 @@ impl PPU {
             };
 
             if bg_color != 0 && sprite_color != 0 && sprite0 {
-                self.status_register |= StatusFlag::Sprite0Hit;
+                self.status_register |= StatusFlags::Sprite0Hit;
             }
 
-            if !(self.read_mask_flag(MaskFlag::ShowBG)
-                && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8BG)))
+            if !(self.read_mask_flag(MaskFlags::ShowBG)
+                && (x >= 8 || self.read_mask_flag(MaskFlags::ShowLeft8BG)))
             {
                 bg_palette = 0;
                 bg_color = 0;
             }
-            if !(self.read_mask_flag(MaskFlag::ShowSprites)
-                && (x >= 8 || self.read_mask_flag(MaskFlag::ShowLeft8Sprites)))
+            if !(self.read_mask_flag(MaskFlags::ShowSprites)
+                && (x >= 8 || self.read_mask_flag(MaskFlags::ShowLeft8Sprites)))
             {
                 sprite_palette = 0b0100;
                 sprite_color = 0;
@@ -578,7 +579,7 @@ impl PPU {
 
         let data = self.palettes[physical as usize];
         // greyscale mode asks off the low bits
-        if self.read_mask_flag(MaskFlag::Greyscale) {
+        if self.read_mask_flag(MaskFlags::Greyscale) {
             data & 0b00110000
         } else {
             data & 0b00111111
@@ -603,27 +604,28 @@ impl PPU {
     fn manage_nmi(&mut self) -> bool {
         if self.nmi_requested {
             self.nmi_requested = false;
-            self.read_ctrl_flag(CtrlFlag::NmiEnabled)
+            self.read_ctrl_flag(CtrlFlags::NmiEnabled)
         } else {
             false
         }
     }
 
-    fn get_ctrl_flags(&self) -> u8 {
-        self.ctrl_high_register | self.temporary_vram_address.get_nametable_bits()
+    fn get_ctrl_flags(&self) -> CtrlFlags {
+        self.ctrl_high_register
+            | CtrlFlags::from_bits_truncate(self.temporary_vram_address.get_nametable_bits())
     }
 
-    fn set_ctrl_flags(&mut self, data: u8) -> u8 {
+    fn set_ctrl_flags(&mut self, data: CtrlFlags) -> CtrlFlags {
         let old = self.get_ctrl_flags();
         if !self.resetting {
-            self.ctrl_high_register = data & 0b11111100;
-            self.temporary_vram_address.set_nametable_bits(data);
+            self.ctrl_high_register = CtrlFlags::from_bits_truncate(data.bits() & 0b11111100);
+            self.temporary_vram_address.set_nametable_bits(data.bits());
         }
         old
     }
 
     #[cfg(test)]
-    fn set_ctrl_flag(&mut self, flag: CtrlFlag, value: bool) {
+    fn set_ctrl_flag(&mut self, flag: CtrlFlags, value: bool) {
         if value {
             self.set_ctrl_flags(self.get_ctrl_flags() | flag);
         } else {
@@ -631,37 +633,29 @@ impl PPU {
         }
     }
 
-    fn read_ctrl_flag(&self, flag: CtrlFlag) -> bool {
-        (self.get_ctrl_flags() & flag) != 0
+    fn read_ctrl_flag(&self, flag: CtrlFlags) -> bool {
+        self.get_ctrl_flags().contains(flag)
     }
 
     #[cfg(test)]
-    fn set_mask_flag(&mut self, flag: MaskFlag, value: bool) {
-        if value {
-            self.mask_register |= flag;
-        } else {
-            self.mask_register &= !flag;
-        }
+    fn set_mask_flag(&mut self, flag: MaskFlags, value: bool) {
+        self.mask_register.set(flag, value);
     }
 
-    fn read_mask_flag(&self, flag: MaskFlag) -> bool {
-        (self.mask_register & flag) != 0
+    fn read_mask_flag(&self, flag: MaskFlags) -> bool {
+        self.mask_register.contains(flag)
     }
 
-    fn set_status_flag(&mut self, flag: StatusFlag, value: bool) {
-        if value {
-            self.status_register |= flag;
-        } else {
-            self.status_register &= !flag;
-        }
+    fn set_status_flag(&mut self, flag: StatusFlags, value: bool) {
+        self.status_register.set(flag, value);
     }
 
-    fn read_status_flag(&self, flag: StatusFlag) -> bool {
-        (self.status_register & flag) != 0
+    fn read_status_flag(&self, flag: StatusFlags) -> bool {
+        self.status_register.contains(flag)
     }
 
     fn inc_vram_addr(&mut self) {
-        let amount = if self.read_ctrl_flag(CtrlFlag::IncrementAcross) {
+        let amount = if self.read_ctrl_flag(CtrlFlags::IncrementAcross) {
             32
         } else {
             1
@@ -678,8 +672,8 @@ impl BusDevice for PPU {
                 0x2001 => self.data_buffer,
                 0x2002 => {
                     self.write_toggle = false;
-                    let result = self.status_register | (self.data_buffer & 0x1F);
-                    self.set_status_flag(StatusFlag::VerticalBlank, false);
+                    let result = self.status_register.bits() | (self.data_buffer & 0x1F);
+                    self.set_status_flag(StatusFlags::VerticalBlank, false);
                     result
                 }
                 0x2003 => self.data_buffer,
@@ -712,22 +706,24 @@ impl BusDevice for PPU {
                 0x2000 => {
                     let old = self.get_ctrl_flags();
 
-                    if self.read_status_flag(StatusFlag::VerticalBlank)
-                        && (old & CtrlFlag::NmiEnabled == 0)
-                        && (data & CtrlFlag::NmiEnabled != 0)
+                    let flags = CtrlFlags::from_bits_retain(data);
+
+                    if self.read_status_flag(StatusFlags::VerticalBlank)
+                        && !old.contains(CtrlFlags::NmiEnabled)
+                        && flags.contains(CtrlFlags::NmiEnabled)
                     {
                         self.nmi_requested = true;
                     }
-                    self.set_ctrl_flags(data);
+                    self.set_ctrl_flags(flags);
 
-                    old
+                    old.bits()
                 }
                 0x2001 => {
                     let old = self.mask_register;
                     if !self.resetting {
-                        self.mask_register = data;
+                        self.mask_register = MaskFlags::from_bits_truncate(data);
                     }
-                    old
+                    old.bits()
                 }
                 0x2002 => 0,
                 0x2003 => self.primary_oam.load_addr(data),

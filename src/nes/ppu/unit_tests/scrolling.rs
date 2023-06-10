@@ -1,16 +1,16 @@
 use crate::{
     bus::BusDevice,
     nes::ppu,
-    nes::ppu::flags::{CtrlFlag, MaskFlag, StatusFlag},
+    nes::ppu::flags::{CtrlFlags, MaskFlags, StatusFlags},
 };
 
 #[test]
 fn test_x_scroll() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
-    ppu.set_ctrl_flag(CtrlFlag::NmiEnabled, true);
-    ppu.set_mask_flag(MaskFlag::ShowBG, true);
-    ppu.set_status_flag(StatusFlag::VerticalBlank, true);
+    ppu.set_ctrl_flag(CtrlFlags::NmiEnabled, true);
+    ppu.set_mask_flag(MaskFlags::ShowBG, true);
+    ppu.set_status_flag(StatusFlags::VerticalBlank, true);
 
     // set vram x, y to arbitrary values
     ppu.vram_address.set_coarse_x(13);
@@ -134,9 +134,9 @@ fn test_scroll_post_render() {
     // post render lines shouldn't d any scroll behavior
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
-    ppu.set_ctrl_flag(CtrlFlag::NmiEnabled, true);
-    ppu.set_mask_flag(MaskFlag::ShowBG, true);
-    ppu.set_status_flag(StatusFlag::VerticalBlank, true);
+    ppu.set_ctrl_flag(CtrlFlags::NmiEnabled, true);
+    ppu.set_mask_flag(MaskFlags::ShowBG, true);
+    ppu.set_status_flag(StatusFlags::VerticalBlank, true);
 
     // set vram x, y to arbitrary values
     ppu.vram_address.set_coarse_x(30);

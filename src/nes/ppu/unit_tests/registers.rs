@@ -1,30 +1,30 @@
 use crate::bus::BusDevice;
 use crate::nes::ppu;
-use crate::nes::ppu::flags::{CtrlFlag, MaskFlag, StatusFlag};
+use crate::nes::ppu::flags::{CtrlFlags, MaskFlags, StatusFlags};
 
 #[test]
 fn test_ctrl_register() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
-    assert_eq!(0, ppu.get_ctrl_flags());
+    assert_eq!(0, ppu.get_ctrl_flags().bits());
 
     ppu.write(
         0x2000,
-        CtrlFlag::IncrementAcross | CtrlFlag::SpriteSizeLarge,
+        (CtrlFlags::IncrementAcross | CtrlFlags::SpriteSizeLarge).bits(),
     );
 
     assert_eq!(0, ppu.temporary_vram_address.register);
 
     assert_eq!(
-        CtrlFlag::IncrementAcross | CtrlFlag::SpriteSizeLarge,
+        CtrlFlags::IncrementAcross | CtrlFlags::SpriteSizeLarge,
         ppu.get_ctrl_flags()
     );
 
-    ppu.write(0x2000, 0 | CtrlFlag::BaseNameTableHigh);
+    ppu.write(0x2000, CtrlFlags::BaseNameTableHigh.bits());
 
     assert_eq!(0b0000100000000000, ppu.temporary_vram_address.register);
 
-    ppu.write(0x2000, 0 | CtrlFlag::BaseNameTableLow);
+    ppu.write(0x2000, CtrlFlags::BaseNameTableLow.bits());
 
     assert_eq!(0b0000010000000000, ppu.temporary_vram_address.register);
     assert_eq!(0, ppu.vram_address.register);
@@ -34,12 +34,15 @@ fn test_ctrl_register() {
 fn test_mask_register() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
-    assert_eq!(0, ppu.mask_register);
+    assert_eq!(0, ppu.mask_register.bits());
 
-    ppu.write(0x2001, MaskFlag::EmphasizeBlue | MaskFlag::ShowBG);
+    ppu.write(
+        0x2001,
+        (MaskFlags::EmphasizeBlue | MaskFlags::ShowBG).bits(),
+    );
 
     assert_eq!(
-        MaskFlag::EmphasizeBlue | MaskFlag::ShowBG,
+        MaskFlags::EmphasizeBlue | MaskFlags::ShowBG,
         ppu.mask_register
     );
     assert_eq!(0, ppu.vram_address.register);
@@ -50,21 +53,21 @@ fn test_status_regiter() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(
-        Some(StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow),
+        Some((StatusFlags::VerticalBlank | StatusFlags::SpriteOverflow).bits()),
         ppu.read(0x2002)
     );
 
-    ppu.set_status_flag(StatusFlag::VerticalBlank, true);
-    ppu.set_status_flag(StatusFlag::SpriteOverflow, false);
-    ppu.set_status_flag(StatusFlag::Sprite0Hit, true);
+    ppu.set_status_flag(StatusFlags::VerticalBlank, true);
+    ppu.set_status_flag(StatusFlags::SpriteOverflow, false);
+    ppu.set_status_flag(StatusFlags::Sprite0Hit, true);
 
     assert_eq!(
-        Some(StatusFlag::VerticalBlank | StatusFlag::Sprite0Hit),
+        Some((StatusFlags::VerticalBlank | StatusFlags::Sprite0Hit).bits()),
         ppu.read(0x2002)
     );
 
     // first ready should have cleared the vertical blank flag
-    assert_eq!(Some(0 | StatusFlag::Sprite0Hit), ppu.read(0x2002));
+    assert_eq!(Some(StatusFlags::Sprite0Hit.bits()), ppu.read(0x2002));
 
     assert_eq!(0, ppu.vram_address.register);
 }
@@ -140,7 +143,7 @@ fn test_scroll_registers() {
 fn test_data_registers_small_stride() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
-    ppu.set_ctrl_flag(CtrlFlag::IncrementAcross, false);
+    ppu.set_ctrl_flag(CtrlFlags::IncrementAcross, false);
 
     assert_eq!(0, ppu.bus.read(0x1234));
     assert_eq!(0, ppu.bus.read(0x1235));
@@ -178,7 +181,7 @@ fn test_data_registers_small_stride() {
 fn test_data_registers_large_stride() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
-    ppu.set_ctrl_flag(CtrlFlag::IncrementAcross, true);
+    ppu.set_ctrl_flag(CtrlFlags::IncrementAcross, true);
 
     assert_eq!(0, ppu.bus.read(0x1234));
     assert_eq!(0, ppu.bus.read(0x1254));
@@ -213,33 +216,33 @@ fn test_automatic_status() {
     assert_eq!(-1, ppu.scan_line);
     assert_eq!(0, ppu.tick);
 
-    ppu.set_ctrl_flag(CtrlFlag::NmiEnabled, true);
+    ppu.set_ctrl_flag(CtrlFlags::NmiEnabled, true);
 
     ppu.status_register =
-        StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow | StatusFlag::Sprite0Hit;
+        StatusFlags::VerticalBlank | StatusFlags::SpriteOverflow | StatusFlags::Sprite0Hit;
     assert_eq!((false, false), ppu.clock());
     assert_eq!(
-        StatusFlag::VerticalBlank | StatusFlag::SpriteOverflow | StatusFlag::Sprite0Hit,
+        StatusFlags::VerticalBlank | StatusFlags::SpriteOverflow | StatusFlags::Sprite0Hit,
         ppu.status_register
     );
     assert_eq!((false, false), ppu.clock());
-    assert_eq!(0, ppu.status_register);
+    assert_eq!(0, ppu.status_register.bits());
 
     ppu.scan_line = 241;
     ppu.tick = 0;
     assert_eq!((false, false), ppu.clock());
-    assert_eq!(0, ppu.status_register);
+    assert_eq!(0, ppu.status_register.bits());
     assert_eq!((false, true), ppu.clock()); // nmi should happen here
-    assert!(ppu.read_status_flag(StatusFlag::VerticalBlank));
-    assert_eq!(Some(StatusFlag::VerticalBlank | 0), ppu.read(0x2002)); // should clear VB flag
+    assert!(ppu.read_status_flag(StatusFlags::VerticalBlank));
+    assert_eq!(Some(StatusFlags::VerticalBlank.bits()), ppu.read(0x2002)); // should clear VB flag
     assert_eq!(Some(0), ppu.read(0x2002));
 
-    ppu.set_ctrl_flag(CtrlFlag::NmiEnabled, false);
-    ppu.status_register = 0;
+    ppu.set_ctrl_flag(CtrlFlags::NmiEnabled, false);
+    ppu.status_register = StatusFlags::empty();
     ppu.scan_line = 241;
     ppu.tick = 0;
     assert_eq!((false, false), ppu.clock());
-    assert_eq!(0, ppu.status_register);
+    assert_eq!(0, ppu.status_register.bits());
     assert_eq!((false, false), ppu.clock()); // nmi should not happen here because disabled
-    assert_eq!(StatusFlag::VerticalBlank | 0, ppu.status_register);
+    assert_eq!(StatusFlags::VerticalBlank, ppu.status_register);
 }

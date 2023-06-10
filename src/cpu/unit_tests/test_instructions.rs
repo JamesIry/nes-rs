@@ -8,7 +8,7 @@ use crate::cpu::*;
 #[test]
 fn test_nop() {
     let mut cpu = CPU::default();
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
     cpu.a = 0x42;
     cpu.x = 0x43;
     cpu.y = 0x44;
@@ -19,7 +19,7 @@ fn test_nop() {
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(NOP, Imp)
     );
-    assert_eq!(cpu.status, 0);
+    assert_eq!(cpu.status.bits(), 0);
     assert_eq!(cpu.a, 0x42);
     assert_eq!(cpu.x, 0x43);
     assert_eq!(cpu.y, 0x44);
@@ -30,76 +30,76 @@ fn test_nop() {
 #[test]
 fn test_flags() {
     let mut cpu = CPU::default();
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
 
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(SEC, Imp)
     );
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CLC, Imp)
     );
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
 
-    cpu.status |= Flag::Zero;
-    assert!(cpu.read_flag(Flag::Zero));
-    cpu.status &= !Flag::Zero;
-    assert!(!cpu.read_flag(Flag::Zero));
+    cpu.status |= StatusFlags::Zero;
+    assert!(cpu.read_flag(StatusFlags::Zero));
+    cpu.status &= !StatusFlags::Zero;
+    assert!(!cpu.read_flag(StatusFlags::Zero));
 
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(SEI, Imp)
     );
-    assert!(cpu.read_flag(Flag::InterruptDisable));
+    assert!(cpu.read_flag(StatusFlags::InterruptDisable));
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CLI, Imp)
     );
-    assert!(!cpu.read_flag(Flag::InterruptDisable));
+    assert!(!cpu.read_flag(StatusFlags::InterruptDisable));
 
-    cpu.status |= Flag::Break;
-    assert!(cpu.read_flag(Flag::Break));
-    cpu.status &= !Flag::Break;
-    assert!(!cpu.read_flag(Flag::Break));
+    cpu.status |= StatusFlags::Break;
+    assert!(cpu.read_flag(StatusFlags::Break));
+    cpu.status &= !StatusFlags::Break;
+    assert!(!cpu.read_flag(StatusFlags::Break));
 
-    cpu.status |= Flag::Unused;
-    assert!(cpu.read_flag(Flag::Unused));
-    cpu.status &= !Flag::Unused;
-    assert!(!cpu.read_flag(Flag::Unused));
+    cpu.status |= StatusFlags::Unused;
+    assert!(cpu.read_flag(StatusFlags::Unused));
+    cpu.status &= !StatusFlags::Unused;
+    assert!(!cpu.read_flag(StatusFlags::Unused));
 
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(SED, Imp)
     );
-    assert!(cpu.read_flag(Flag::Decimal));
+    assert!(cpu.read_flag(StatusFlags::Decimal));
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CLD, Imp)
     );
-    assert!(!cpu.read_flag(Flag::Decimal));
+    assert!(!cpu.read_flag(StatusFlags::Decimal));
 
-    cpu.status |= Flag::Overflow;
-    assert!(cpu.read_flag(Flag::Overflow));
+    cpu.status |= StatusFlags::Overflow;
+    assert!(cpu.read_flag(StatusFlags::Overflow));
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CLV, Imp)
     );
-    assert!(!cpu.read_flag(Flag::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Overflow));
 
-    cpu.status |= Flag::Negative;
-    assert!(cpu.read_flag(Flag::Negative));
-    cpu.status &= !Flag::Negative;
-    assert!(!cpu.read_flag(Flag::Negative));
+    cpu.status |= StatusFlags::Negative;
+    assert!(cpu.read_flag(StatusFlags::Negative));
+    cpu.status &= !StatusFlags::Negative;
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 
-    assert_eq!(cpu.status, 0);
+    assert_eq!(cpu.status.bits(), 0);
 }
 
 #[test]
 fn test_increments() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
 
     cpu.x = 0x44;
     assert_eq!(
@@ -156,7 +156,7 @@ fn test_increments() {
 #[test]
 fn test_transfers() {
     let mut cpu = CPU::default();
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
 
     cpu.a = 0x42;
     cpu.x = 0x00;
@@ -180,14 +180,14 @@ fn test_transfers() {
     assert_eq!(0x43, cpu.x);
 
     cpu.x = 0x44;
-    cpu.status = Flag::Negative | Flag::Zero;
+    cpu.status = StatusFlags::Negative | StatusFlags::Zero;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(TXS, Imp)
     );
     assert_eq!(0x44, cpu.sp);
     // TXS doesn't modify flags
-    assert_eq!(Flag::Negative | Flag::Zero, cpu.status);
+    assert_eq!(StatusFlags::Negative | StatusFlags::Zero, cpu.status);
 
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -207,7 +207,7 @@ fn test_transfers() {
 fn test_load_store() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
 
     cpu.write_bus_byte(0, 0x7F);
     cpu.write_bus_byte(1, 0x00);
@@ -220,8 +220,8 @@ fn test_load_store() {
     );
     assert_eq!(0x01, cpu.pc);
     assert_eq!(0x7F, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(!cpu.read_flag(Flag::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -229,8 +229,8 @@ fn test_load_store() {
     );
     assert_eq!(0x02, cpu.pc);
     assert_eq!(0x00, cpu.a);
-    assert!(cpu.read_flag(Flag::Zero));
-    assert!(!cpu.read_flag(Flag::Negative));
+    assert!(cpu.read_flag(StatusFlags::Zero));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -238,8 +238,8 @@ fn test_load_store() {
     );
     assert_eq!(0x03, cpu.pc);
     assert_eq!(0xFF, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Negative));
 
     cpu.pc = 0;
     assert_eq!(
@@ -278,14 +278,14 @@ fn test_load_store() {
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x10);
     cpu.a = 0x83;
-    cpu.status = Flag::Zero | Flag::Negative;
+    cpu.status = StatusFlags::Zero | StatusFlags::Negative;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(STA, Zp)
     );
     assert_eq!(0x83, cpu.read_bus_byte(0x10));
     // stores don't modify flags
-    assert_eq!(Flag::Zero | Flag::Negative, cpu.status);
+    assert_eq!(StatusFlags::Zero | StatusFlags::Negative, cpu.status);
 
     cpu.write_bus_byte(1, 0x11);
     cpu.x = 0x84;
@@ -308,40 +308,40 @@ fn test_load_store() {
 fn test_shift() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.a = 0x42;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ASL, A)
     );
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
     assert_eq!(0x84, cpu.a);
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.a = 0b10010010;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ASL, A)
     );
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
     assert_eq!(0b00100100, cpu.a);
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.a = 0x42;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ROL, A)
     );
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
     assert_eq!(0x84, cpu.a);
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.a = 0b10010010;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ROL, A)
     );
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
     assert_eq!(0b00100101, cpu.a);
 
     cpu.write_bus_byte(0, 0x01);
@@ -354,40 +354,40 @@ fn test_shift() {
     );
     assert_eq!(0x84, cpu.read_bus_byte(0x01));
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.a = 0x42;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(LSR, A)
     );
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
     assert_eq!(0x21, cpu.a);
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.a = 0b10010011;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(LSR, A)
     );
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
     assert_eq!(0b01001001, cpu.a);
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.a = 0x42;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ROR, A)
     );
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
     assert_eq!(0x21, cpu.a);
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.a = 0b10010011;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ROR, A)
     );
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
     assert_eq!(0b11001001, cpu.a);
 
     cpu.pc = 0;
@@ -444,9 +444,9 @@ fn test_bit() {
         cpu.execute(BIT, Zp)
     );
     assert_eq!(0b00000000, cpu.a);
-    assert!(cpu.read_flag(Flag::Negative));
-    assert!(cpu.read_flag(Flag::Overflow));
-    assert!(cpu.read_flag(Flag::Zero));
+    assert!(cpu.read_flag(StatusFlags::Negative));
+    assert!(cpu.read_flag(StatusFlags::Overflow));
+    assert!(cpu.read_flag(StatusFlags::Zero));
 
     cpu.pc = 0;
     cpu.a = 0b10000000;
@@ -455,9 +455,9 @@ fn test_bit() {
         cpu.execute(BIT, Zp)
     );
     assert_eq!(0b10000000, cpu.a);
-    assert!(cpu.read_flag(Flag::Negative));
-    assert!(cpu.read_flag(Flag::Overflow));
-    assert!(!cpu.read_flag(Flag::Zero));
+    assert!(cpu.read_flag(StatusFlags::Negative));
+    assert!(cpu.read_flag(StatusFlags::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
 
     cpu.write_bus_byte(1, 0b01000000);
     cpu.pc = 0;
@@ -467,9 +467,9 @@ fn test_bit() {
         cpu.execute(BIT, Zp)
     );
     assert_eq!(0b10000000, cpu.a);
-    assert!(!cpu.read_flag(Flag::Negative));
-    assert!(cpu.read_flag(Flag::Overflow));
-    assert!(cpu.read_flag(Flag::Zero));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
+    assert!(cpu.read_flag(StatusFlags::Overflow));
+    assert!(cpu.read_flag(StatusFlags::Zero));
 
     cpu.write_bus_byte(1, 0b10000000);
     cpu.pc = 0;
@@ -479,9 +479,9 @@ fn test_bit() {
         cpu.execute(BIT, Zp)
     );
     assert_eq!(0b10000000, cpu.a);
-    assert!(cpu.read_flag(Flag::Negative));
-    assert!(!cpu.read_flag(Flag::Overflow));
-    assert!(!cpu.read_flag(Flag::Zero));
+    assert!(cpu.read_flag(StatusFlags::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
 }
 
 #[test]
@@ -496,9 +496,9 @@ fn test_compare() {
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CMP, Imm)
     );
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(!cpu.read_flag(Flag::Carry));
-    assert!(cpu.read_flag(Flag::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
+    assert!(cpu.read_flag(StatusFlags::Negative));
 
     cpu.pc = 0;
     cpu.a = 0x42;
@@ -506,9 +506,9 @@ fn test_compare() {
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CMP, Imm)
     );
-    assert!(cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
+    assert!(cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 
     cpu.pc = 0;
     cpu.a = 0x43;
@@ -516,9 +516,9 @@ fn test_compare() {
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CMP, Imm)
     );
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 
     cpu.pc = 0;
     cpu.a = 0x00;
@@ -527,9 +527,9 @@ fn test_compare() {
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CPX, Imm)
     );
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 
     cpu.pc = 0;
     cpu.x = 0x00;
@@ -538,16 +538,16 @@ fn test_compare() {
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(CPY, Imm)
     );
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 }
 
 #[test]
 fn test_branch() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
 
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
 
     // check for backwards relative
     cpu.pc = 0x10;
@@ -568,7 +568,7 @@ fn test_branch() {
     );
     assert_eq!(0x13, cpu.pc);
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.pc = 0x10;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -584,7 +584,7 @@ fn test_branch() {
     );
     assert_eq!(0x13, cpu.pc);
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0x10;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -602,7 +602,7 @@ fn test_branch() {
     );
     assert_eq!(0x13, cpu.pc);
 
-    cpu.set_flag(Flag::Zero, true);
+    cpu.set_flag(StatusFlags::Zero, true);
     cpu.pc = 0x10;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -618,7 +618,7 @@ fn test_branch() {
     );
     assert_eq!(0x13, cpu.pc);
 
-    cpu.set_flag(Flag::Zero, false);
+    cpu.set_flag(StatusFlags::Zero, false);
     cpu.pc = 0x10;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -636,7 +636,7 @@ fn test_branch() {
     );
     assert_eq!(0x13, cpu.pc);
 
-    cpu.set_flag(Flag::Negative, true);
+    cpu.set_flag(StatusFlags::Negative, true);
     cpu.pc = 0x10;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -652,7 +652,7 @@ fn test_branch() {
     );
     assert_eq!(0x13, cpu.pc);
 
-    cpu.set_flag(Flag::Negative, false);
+    cpu.set_flag(StatusFlags::Negative, false);
     cpu.pc = 0x10;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -670,7 +670,7 @@ fn test_branch() {
     );
     assert_eq!(0x13, cpu.pc);
 
-    cpu.set_flag(Flag::Overflow, true);
+    cpu.set_flag(StatusFlags::Overflow, true);
     cpu.pc = 0x10;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -686,7 +686,7 @@ fn test_branch() {
     );
     assert_eq!(0x13, cpu.pc);
 
-    cpu.set_flag(Flag::Overflow, false);
+    cpu.set_flag(StatusFlags::Overflow, false);
     cpu.pc = 0x10;
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -708,7 +708,7 @@ fn test_stack() {
     assert_eq!(0xFE, cpu.sp);
     assert_eq!(0x42, cpu.read_bus_byte(0x01FF));
 
-    cpu.status = 0xFF;
+    cpu.status = StatusFlags::all();
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(PHP, Imp)
@@ -716,13 +716,13 @@ fn test_stack() {
     assert_eq!(0xFD, cpu.sp);
     assert_eq!(0xFF, cpu.read_bus_byte(0x01FE));
 
-    cpu.status = 0x00;
+    cpu.status = StatusFlags::empty();
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(PLP, Imp)
     );
     assert_eq!(0xFE, cpu.sp);
-    assert_eq!(0xFF, cpu.status);
+    assert_eq!(0xFF, cpu.status.bits());
 
     cpu.a = 0x00;
     assert_eq!(
@@ -753,9 +753,9 @@ fn test_stack() {
 #[test]
 fn test_adc_binary() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
-    cpu.set_flag(Flag::Decimal, false);
+    cpu.set_flag(StatusFlags::Decimal, false);
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x21);
     cpu.a = 0x20;
@@ -764,12 +764,12 @@ fn test_adc_binary() {
         cpu.execute(ADC, Imm)
     );
     assert_eq!(0x41, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(!cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
-    assert!(!cpu.read_flag(Flag::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Overflow));
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x21);
     cpu.a = 0x20;
@@ -778,12 +778,12 @@ fn test_adc_binary() {
         cpu.execute(ADC, Imm)
     );
     assert_eq!(0x42, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(!cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
-    assert!(!cpu.read_flag(Flag::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Overflow));
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x01);
     cpu.a = 0xFF;
@@ -792,12 +792,12 @@ fn test_adc_binary() {
         cpu.execute(ADC, Imm)
     );
     assert_eq!(0x00, cpu.a);
-    assert!(cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
-    assert!(!cpu.read_flag(Flag::Overflow));
+    assert!(cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Overflow));
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x7F);
     cpu.a = 0x7F;
@@ -806,18 +806,18 @@ fn test_adc_binary() {
         cpu.execute(ADC, Imm)
     );
     assert_eq!(0xFE, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(!cpu.read_flag(Flag::Carry));
-    assert!(cpu.read_flag(Flag::Negative));
-    assert!(cpu.read_flag(Flag::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
+    assert!(cpu.read_flag(StatusFlags::Negative));
+    assert!(cpu.read_flag(StatusFlags::Overflow));
 }
 
 #[test]
 fn test_adc_decimal() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
-    cpu.set_flag(Flag::Decimal, true);
+    cpu.set_flag(StatusFlags::Decimal, true);
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x21);
     cpu.a = 0x20;
@@ -826,9 +826,9 @@ fn test_adc_decimal() {
         cpu.execute(ADC, Imm)
     );
     assert_eq!(0x41, cpu.a);
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x21);
     cpu.a = 0x20;
@@ -837,9 +837,9 @@ fn test_adc_decimal() {
         cpu.execute(ADC, Imm)
     );
     assert_eq!(0x42, cpu.a);
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x99);
     cpu.a = 0x01;
@@ -848,15 +848,15 @@ fn test_adc_decimal() {
         cpu.execute(ADC, Imm)
     );
     assert_eq!(0x00, cpu.a);
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
 }
 
 #[test]
 fn test_sbc_binary() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
-    cpu.set_flag(Flag::Decimal, false);
+    cpu.set_flag(StatusFlags::Decimal, false);
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x21);
     cpu.a = 0x41;
@@ -865,12 +865,12 @@ fn test_sbc_binary() {
         cpu.execute(SBC, Imm)
     );
     assert_eq!(0x20, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
-    assert!(!cpu.read_flag(Flag::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Overflow));
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x21);
     cpu.a = 0x42;
@@ -879,12 +879,12 @@ fn test_sbc_binary() {
         cpu.execute(SBC, Imm)
     );
     assert_eq!(0x20, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
-    assert!(!cpu.read_flag(Flag::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Overflow));
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x01);
     cpu.a = 0x00;
@@ -893,12 +893,12 @@ fn test_sbc_binary() {
         cpu.execute(SBC, Imm)
     );
     assert_eq!(0xFF, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(!cpu.read_flag(Flag::Carry));
-    assert!(cpu.read_flag(Flag::Negative));
-    assert!(!cpu.read_flag(Flag::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
+    assert!(cpu.read_flag(StatusFlags::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Overflow));
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x7F);
     cpu.a = 0xFE;
@@ -907,18 +907,18 @@ fn test_sbc_binary() {
         cpu.execute(SBC, Imm)
     );
     assert_eq!(0x7F, cpu.a);
-    assert!(!cpu.read_flag(Flag::Zero));
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
-    assert!(cpu.read_flag(Flag::Overflow));
+    assert!(!cpu.read_flag(StatusFlags::Zero));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
+    assert!(cpu.read_flag(StatusFlags::Overflow));
 }
 
 #[test]
 fn test_sbc_decimal() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
-    cpu.set_flag(Flag::Decimal, true);
+    cpu.set_flag(StatusFlags::Decimal, true);
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x20);
     cpu.a = 0x41;
@@ -927,9 +927,9 @@ fn test_sbc_decimal() {
         cpu.execute(SBC, Imm)
     );
     assert_eq!(0x21, cpu.a);
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x20);
     cpu.a = 0x42;
@@ -938,9 +938,9 @@ fn test_sbc_decimal() {
         cpu.execute(SBC, Imm)
     );
     assert_eq!(0x21, cpu.a);
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
 
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x99);
     cpu.a = 0x00;
@@ -949,9 +949,9 @@ fn test_sbc_decimal() {
         cpu.execute(SBC, Imm)
     );
     assert_eq!(0x01, cpu.a);
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
 
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x00);
     cpu.a = 0x90;
@@ -960,7 +960,7 @@ fn test_sbc_decimal() {
         cpu.execute(SBC, Imm)
     );
     assert_eq!(0x89, cpu.a);
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
 }
 
 #[test]
@@ -1002,19 +1002,19 @@ fn test_jmp() {
 #[test]
 fn test_jsr_rts() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
 
     cpu.sp = 0xFF;
     cpu.pc = 0;
     cpu.write_bus_byte(0, 0x34);
     cpu.write_bus_byte(1, 0x12);
-    cpu.set_flag(Flag::Decimal, true);
+    cpu.set_flag(StatusFlags::Decimal, true);
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::Taken),
         cpu.execute(JSR, Abs)
     );
     assert_eq!(0x1234, cpu.pc);
-    assert_eq!(Flag::Decimal as u8, cpu.status);
+    assert_eq!(StatusFlags::Decimal, cpu.status);
     assert_eq!(0xFD, cpu.sp);
     assert_eq!(0x01, cpu.read_bus_byte(0x1FE));
     assert_eq!(0x00, cpu.read_bus_byte(0x1FF));
@@ -1025,32 +1025,38 @@ fn test_jsr_rts() {
     );
     assert_eq!(0x0002, cpu.pc);
     assert_eq!(0xFF, cpu.sp);
-    assert_eq!(Flag::Decimal as u8, cpu.status);
+    assert_eq!(StatusFlags::Decimal, cpu.status);
 }
 
 #[test]
 fn test_brk_rti() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
 
     cpu.sp = 0xFF;
     cpu.pc = 0;
     cpu.write_bus_byte(0xfffe, 0x34);
     cpu.write_bus_byte(0xffff, 0x12);
-    cpu.set_flag(Flag::Decimal, true);
-    cpu.set_flag(Flag::InterruptDisable, false);
+    cpu.set_flag(StatusFlags::Decimal, true);
+    cpu.set_flag(StatusFlags::InterruptDisable, false);
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(BRK, Imp)
     );
     assert_eq!(0x1234, cpu.pc);
-    assert_eq!(Flag::Decimal | Flag::InterruptDisable, cpu.status);
+    assert_eq!(
+        StatusFlags::Decimal | StatusFlags::InterruptDisable,
+        cpu.status
+    );
     assert_eq!(0xFC, cpu.sp);
 
     assert_eq!(0x00, cpu.read_bus_byte(0x1FF));
     assert_eq!(0x01, cpu.read_bus_byte(0x1FE));
 
-    assert_eq!(Flag::Decimal | Flag::Break, cpu.read_bus_byte(0x1FD));
+    assert_eq!(
+        (StatusFlags::Decimal | StatusFlags::Break).bits(),
+        cpu.read_bus_byte(0x1FD)
+    );
 
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
@@ -1058,5 +1064,8 @@ fn test_brk_rti() {
     );
     assert_eq!(0x0001, cpu.pc);
     assert_eq!(0xFF, cpu.sp);
-    assert_eq!(Flag::Decimal | Flag::Break | Flag::Unused, cpu.status);
+    assert_eq!(
+        StatusFlags::Decimal | StatusFlags::Break | StatusFlags::Unused,
+        cpu.status
+    );
 }

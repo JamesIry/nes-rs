@@ -8,7 +8,7 @@ use crate::cpu::*;
 #[test]
 fn test_load_store_unofficial() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
-    cpu.status = 0;
+    cpu.status = StatusFlags::empty();
 
     cpu.pc = 0;
     cpu.y = 4;
@@ -96,63 +96,63 @@ fn test_logic_unofficial() {
     cpu.pc = 0;
     cpu.a = 0b10010110;
     cpu.write_bus_byte(0, 0x0F);
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ANC, Imm)
     );
     assert_eq!(0b00000110, cpu.a);
-    assert!(!cpu.read_flag(Flag::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
 
     cpu.pc = 0;
     cpu.a = 0b10010110;
     cpu.write_bus_byte(0, 0xFF);
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ANC, Imm)
     );
     assert_eq!(0b10010110, cpu.a);
-    assert!(cpu.read_flag(Flag::Carry));
+    assert!(cpu.read_flag(StatusFlags::Carry));
 
-    cpu.set_flag(Flag::Decimal, false);
+    cpu.set_flag(StatusFlags::Decimal, false);
 
     cpu.pc = 0;
     cpu.a = 0b10010110;
     cpu.write_bus_byte(0, 0b11111100);
-    cpu.set_flag(Flag::Carry, false);
+    cpu.set_flag(StatusFlags::Carry, false);
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ARR, Imm)
     );
     assert_eq!(0b01001010, cpu.a);
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 
     cpu.pc = 0;
     cpu.a = 0b01010110;
     cpu.write_bus_byte(0, 0b11111100);
-    cpu.set_flag(Flag::Carry, true);
+    cpu.set_flag(StatusFlags::Carry, true);
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ARR, Imm)
     );
     assert_eq!(0b10101010, cpu.a);
-    assert!(!cpu.read_flag(Flag::Carry));
-    assert!(cpu.read_flag(Flag::Negative));
+    assert!(!cpu.read_flag(StatusFlags::Carry));
+    assert!(cpu.read_flag(StatusFlags::Negative));
 
     cpu.pc = 0;
     cpu.a = 0b01010111;
     cpu.write_bus_byte(0, 0b11111101);
-    cpu.set_flag(Flag::Carry, false);
-    cpu.set_flag(Flag::Negative, true);
+    cpu.set_flag(StatusFlags::Carry, false);
+    cpu.set_flag(StatusFlags::Negative, true);
     assert_eq!(
         (PageBoundary::NotCrossed, Branch::NotTaken),
         cpu.execute(ASR, Imm)
     );
     assert_eq!(0b00101010, cpu.a);
-    assert!(cpu.read_flag(Flag::Carry));
-    assert!(!cpu.read_flag(Flag::Negative));
+    assert!(cpu.read_flag(StatusFlags::Carry));
+    assert!(!cpu.read_flag(StatusFlags::Negative));
 }
 
 // DCP

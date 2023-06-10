@@ -43,7 +43,7 @@ pub struct CPU {
     pub a: u8,
     pub x: u8,
     pub y: u8,
-    pub status: u8,
+    pub status: StatusFlags,
     pub sp: u8,
     pub pc: u16,
     pub cycles: usize,
@@ -74,7 +74,7 @@ impl CPU {
             a: 0,
             x: 0,
             y: 0,
-            status: Flag::Break | Flag::Unused,
+            status: StatusFlags::Break | StatusFlags::Unused,
             sp: 0,
             pc: 0,
             jammed: true,
@@ -142,7 +142,7 @@ impl CPU {
 
     #[allow(unused)]
     pub fn irq(&mut self) {
-        if self.interrupt.is_none() && !self.read_flag(Flag::InterruptDisable) {
+        if self.interrupt.is_none() && !self.read_flag(StatusFlags::InterruptDisable) {
             self.interrupt = Some(Interrupt::IRQ);
             self.trapped = false;
         }
@@ -189,7 +189,7 @@ impl CPU {
                             self.a,
                             self.x,
                             self.y,
-                            self.status,
+                            self.status.bits(),
                         )
                         .unwrap(); // TODO propogate error
                     let op = self.fetch_byte();
@@ -233,14 +233,14 @@ impl CPU {
                     .wrapping_add(if interrupt == Interrupt::BRK { 1 } else { 0 }),
             );
             let status = if interrupt == Interrupt::BRK {
-                self.status | Flag::Break
+                self.status | StatusFlags::Break
             } else {
-                self.status & !Flag::Break
+                self.status & !StatusFlags::Break
             };
 
-            self.push_byte(status);
+            self.push_byte(status.bits());
         }
-        self.set_flag(Flag::InterruptDisable, true);
+        self.set_flag(StatusFlags::InterruptDisable, true);
 
         let addr = match interrupt {
             Interrupt::BRK => IRQ_ADDR,
@@ -306,10 +306,10 @@ impl CPU {
             Instruction::BRK => self.interrupt(Interrupt::BRK),
             Instruction::BVC => self.branch(mode, BranchType::VC),
             Instruction::BVS => self.branch(mode, BranchType::VS),
-            Instruction::CLC => self.set_flag(Flag::Carry, false),
-            Instruction::CLD => self.set_flag(Flag::Decimal, false),
-            Instruction::CLI => self.set_flag(Flag::InterruptDisable, false),
-            Instruction::CLV => self.set_flag(Flag::Overflow, false),
+            Instruction::CLC => self.set_flag(StatusFlags::Carry, false),
+            Instruction::CLD => self.set_flag(StatusFlags::Decimal, false),
+            Instruction::CLI => self.set_flag(StatusFlags::InterruptDisable, false),
+            Instruction::CLV => self.set_flag(StatusFlags::Overflow, false),
             Instruction::CMP => self.compare(mode, self.a),
             Instruction::CPX => self.compare(mode, self.x),
             Instruction::CPY => self.compare(mode, self.y),
@@ -337,9 +337,9 @@ impl CPU {
             Instruction::RTI => self.rti(),
             Instruction::RTS => self.rts(),
             Instruction::SBC => self.sbc(mode),
-            Instruction::SEC => self.set_flag(Flag::Carry, true),
-            Instruction::SED => self.set_flag(Flag::Decimal, true),
-            Instruction::SEI => self.set_flag(Flag::InterruptDisable, true),
+            Instruction::SEC => self.set_flag(StatusFlags::Carry, true),
+            Instruction::SED => self.set_flag(StatusFlags::Decimal, true),
+            Instruction::SEI => self.set_flag(StatusFlags::InterruptDisable, true),
             Instruction::STA => self.transfer_without_flags(Mode::A, mode),
             Instruction::STX => self.transfer_without_flags(Mode::X, mode),
             Instruction::STY => self.transfer_without_flags(Mode::Y, mode),
@@ -383,13 +383,13 @@ impl CPU {
         self.write_value(
             location,
             (m.0 << 1)
-                | if shift_style == ShiftStyle::Rotate && self.read_flag(Flag::Carry) {
+                | if shift_style == ShiftStyle::Rotate && self.read_flag(StatusFlags::Carry) {
                     1
                 } else {
                     0
                 },
         );
-        self.set_flag(Flag::Carry, m.0 & SIGN_BIT != 0);
+        self.set_flag(StatusFlags::Carry, m.0 & SIGN_BIT != 0);
         (m.1, Branch::NotTaken)
     }
 
@@ -400,13 +400,13 @@ impl CPU {
         self.write_value(
             location,
             (m.0 >> 1)
-                | if shift_style == ShiftStyle::Rotate && self.read_flag(Flag::Carry) {
+                | if shift_style == ShiftStyle::Rotate && self.read_flag(StatusFlags::Carry) {
                     SIGN_BIT
                 } else {
                     0
                 },
         );
-        self.set_flag(Flag::Carry, m.0 & 1 != 0);
+        self.set_flag(StatusFlags::Carry, m.0 & 1 != 0);
         (m.1, Branch::NotTaken)
     }
 
@@ -430,19 +430,26 @@ impl CPU {
         let location = self.get_location(mode);
         let m_orig = self.read_value(location);
         let m = m_orig.0;
-        let carry = if self.read_flag(Flag::Carry) { 1 } else { 0 };
+        let carry = if self.read_flag(StatusFlags::Carry) {
+            1
+        } else {
+            0
+        };
 
         let mut tmp: u16 = (self.a as u16).wrapping_add(m as u16).wrapping_add(carry);
 
-        self.set_flag(Flag::Zero, tmp & LOW_BYTE_MASK == 0);
+        self.set_flag(StatusFlags::Zero, tmp & LOW_BYTE_MASK == 0);
 
-        if self.read_flag(Flag::Decimal) && self.bcd_enabled() {
+        if self.read_flag(StatusFlags::Decimal) && self.bcd_enabled() {
             // if the sum of the lowest digits is > 9, then
             // add 6 to fix the lowest digit back to bcd
-            let fixup = if (self.a & 0x0F)
-                .wrapping_add(m & 0x0F)
-                .wrapping_add(if self.read_flag(Flag::Carry) { 1 } else { 0 })
-                > 9
+            let fixup = if (self.a & 0x0F).wrapping_add(m & 0x0F).wrapping_add(
+                if self.read_flag(StatusFlags::Carry) {
+                    1
+                } else {
+                    0
+                },
+            ) > 9
             {
                 6
             } else {
@@ -453,9 +460,9 @@ impl CPU {
 
             // in BCD, Negative and Overflow are set weirdly - as if this was binary
             // math up to this point
-            self.set_flag(Flag::Negative, tmp & (SIGN_BIT as u16) != 0);
+            self.set_flag(StatusFlags::Negative, tmp & (SIGN_BIT as u16) != 0);
             self.set_flag(
-                Flag::Overflow,
+                StatusFlags::Overflow,
                 (self.a ^ m) & SIGN_BIT == 0 && (self.a as u16 ^ tmp) & SIGN_BIT as u16 != 0,
             );
 
@@ -467,18 +474,18 @@ impl CPU {
             }
 
             // carry flag is actually right
-            self.set_flag(Flag::Carry, tmp > 0x99);
+            self.set_flag(StatusFlags::Carry, tmp > 0x99);
         } else {
-            self.set_flag(Flag::Negative, tmp & (SIGN_BIT as u16) != 0);
+            self.set_flag(StatusFlags::Negative, tmp & (SIGN_BIT as u16) != 0);
             // for overflow, pretend all the values are signed.
             // if the sign bits of the inputs are the same as each other but
             // different from the sign bit of the output then there was overflow
             self.set_flag(
-                Flag::Overflow,
+                StatusFlags::Overflow,
                 (self.a ^ m) & SIGN_BIT == 0 && (self.a as u16 ^ tmp) & SIGN_BIT as u16 != 0,
             );
 
-            self.set_flag(Flag::Carry, tmp > 0xFF);
+            self.set_flag(StatusFlags::Carry, tmp > 0xFF);
         };
 
         self.write_value_without_flags(Location::A, (tmp & 0xFF) as u8);
@@ -489,21 +496,28 @@ impl CPU {
         let location = self.get_location(mode);
         let m_orig = self.read_value(location);
         let m = m_orig.0;
-        let borrow = if self.read_flag(Flag::Carry) { 0 } else { 1 };
+        let borrow = if self.read_flag(StatusFlags::Carry) {
+            0
+        } else {
+            1
+        };
 
         let mut tmp: u16 = (self.a as u16).wrapping_sub(m as u16).wrapping_sub(borrow);
 
-        self.set_flag(Flag::Negative, tmp & (SIGN_BIT as u16) != 0);
-        self.set_flag(Flag::Zero, tmp & LOW_BYTE_MASK == 0);
+        self.set_flag(StatusFlags::Negative, tmp & (SIGN_BIT as u16) != 0);
+        self.set_flag(StatusFlags::Zero, tmp & LOW_BYTE_MASK == 0);
         self.set_flag(
-            Flag::Overflow,
+            StatusFlags::Overflow,
             (self.a as u16 ^ tmp) & SIGN_BIT as u16 != 0 && (self.a ^ m) & SIGN_BIT != 0,
         );
 
-        if self.read_flag(Flag::Decimal) && self.bcd_enabled() {
+        if self.read_flag(StatusFlags::Decimal) && self.bcd_enabled() {
             let fixup = if (self.a & 0x0F)
-                < (m & 0x0F).wrapping_add(if self.read_flag(Flag::Carry) { 0 } else { 1 })
-            {
+                < (m & 0x0F).wrapping_add(if self.read_flag(StatusFlags::Carry) {
+                    0
+                } else {
+                    1
+                }) {
                 6
             } else {
                 0
@@ -515,7 +529,7 @@ impl CPU {
             }
         };
 
-        self.set_flag(Flag::Carry, tmp < 0x0100);
+        self.set_flag(StatusFlags::Carry, tmp < 0x0100);
 
         self.write_value_without_flags(Location::A, (tmp & 0xFF) as u8);
         (m_orig.1, Branch::NotTaken)
@@ -524,25 +538,25 @@ impl CPU {
     fn compare(&mut self, mode: Mode, register: u8) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
         let m = self.read_value(location);
-        self.set_flag(Flag::Zero, register == m.0);
-        self.set_flag(Flag::Carry, register >= m.0);
+        self.set_flag(StatusFlags::Zero, register == m.0);
+        self.set_flag(StatusFlags::Carry, register >= m.0);
 
         let tmp = register.wrapping_sub(m.0);
 
-        self.set_flag(Flag::Negative, (tmp & SIGN_BIT) != 0);
+        self.set_flag(StatusFlags::Negative, (tmp & SIGN_BIT) != 0);
         (m.1, Branch::NotTaken)
     }
 
     fn branch(&mut self, mode: Mode, branch_type: BranchType) -> (PageBoundary, Branch) {
         let condition = match branch_type {
-            BranchType::CC => !self.read_flag(Flag::Carry),
-            BranchType::CS => self.read_flag(Flag::Carry),
-            BranchType::NE => !self.read_flag(Flag::Zero),
-            BranchType::EQ => self.read_flag(Flag::Zero),
-            BranchType::PL => !self.read_flag(Flag::Negative),
-            BranchType::MI => self.read_flag(Flag::Negative),
-            BranchType::VC => !self.read_flag(Flag::Overflow),
-            BranchType::VS => self.read_flag(Flag::Overflow),
+            BranchType::CC => !self.read_flag(StatusFlags::Carry),
+            BranchType::CS => self.read_flag(StatusFlags::Carry),
+            BranchType::NE => !self.read_flag(StatusFlags::Zero),
+            BranchType::EQ => self.read_flag(StatusFlags::Zero),
+            BranchType::PL => !self.read_flag(StatusFlags::Negative),
+            BranchType::MI => self.read_flag(StatusFlags::Negative),
+            BranchType::VC => !self.read_flag(StatusFlags::Overflow),
+            BranchType::VS => self.read_flag(StatusFlags::Overflow),
             BranchType::JMP => true,
             BranchType::JSR => true,
         };
@@ -595,7 +609,7 @@ impl CPU {
             Location::X => self.x,
             Location::Y => self.y,
             Location::SP => self.sp,
-            Location::Status => self.status,
+            Location::Status => self.status.bits(),
             Location::Addr(_, addr) => {
                 let value = self.read_bus_byte(addr);
                 self.monitor.read_data_byte(addr, value).unwrap();
@@ -613,8 +627,8 @@ impl CPU {
     fn write_value(&mut self, location: Location, value: u8) -> PageBoundary {
         let page_boundary = self.write_value_without_flags(location, value);
 
-        self.set_flag(Flag::Negative, value & SIGN_BIT != 0);
-        self.set_flag(Flag::Zero, value == 0);
+        self.set_flag(StatusFlags::Negative, value & SIGN_BIT != 0);
+        self.set_flag(StatusFlags::Zero, value == 0);
 
         page_boundary
     }
@@ -626,7 +640,7 @@ impl CPU {
             Location::X => self.x = value,
             Location::Y => self.y = value,
             Location::SP => self.sp = value,
-            Location::Status => self.status = value,
+            Location::Status => self.status = StatusFlags::from_bits_truncate(value),
             Location::Addr(_, addr) => {
                 let old = self.write_bus_byte(addr, value);
                 self.monitor.read_data_byte(addr, old).unwrap();
@@ -642,17 +656,13 @@ impl CPU {
         *boundary
     }
 
-    fn set_flag(&mut self, flag: Flag, value: bool) -> (PageBoundary, Branch) {
-        if value {
-            self.status |= flag;
-        } else {
-            self.status &= !flag;
-        }
+    fn set_flag(&mut self, flag: StatusFlags, value: bool) -> (PageBoundary, Branch) {
+        self.status.set(flag, value);
         (PageBoundary::NotCrossed, Branch::NotTaken)
     }
 
-    fn read_flag(&self, flag: Flag) -> bool {
-        (self.status & flag as u8) != 0
+    fn read_flag(&self, flag: StatusFlags) -> bool {
+        self.status.contains(flag)
     }
 
     fn get_location(&mut self, mode: Mode) -> Location {
@@ -786,7 +796,7 @@ impl CPU {
                 // set except on NMI or IRQ. The easiest way
                 // to make that happen is to set Break and Unused
                 // flags on power up and on pop
-                Flag::Break | Flag::Unused
+                (StatusFlags::Break | StatusFlags::Unused).bits()
             } else {
                 0
             };
@@ -815,9 +825,15 @@ impl CPU {
         let location = self.get_location(mode);
         let m = self.read_value(location);
         let result = self.a & m.0;
-        self.set_flag(Flag::Negative, (m.0 & Flag::Negative) != 0);
-        self.set_flag(Flag::Overflow, (m.0 & Flag::Overflow) != 0);
-        self.set_flag(Flag::Zero, result == 0);
+        self.set_flag(
+            StatusFlags::Negative,
+            (m.0 & StatusFlags::Negative.bits()) != 0,
+        );
+        self.set_flag(
+            StatusFlags::Overflow,
+            (m.0 & StatusFlags::Overflow.bits()) != 0,
+        );
+        self.set_flag(StatusFlags::Zero, result == 0);
         (m.1, Branch::NotTaken)
     }
 
@@ -850,7 +866,7 @@ impl CPU {
 
     fn anc(&mut self, mode: Mode) -> (PageBoundary, Branch) {
         let result = self.binary(|a, m| a & m, mode);
-        self.set_flag(Flag::Carry, self.a & SIGN_BIT != 0);
+        self.set_flag(StatusFlags::Carry, self.a & SIGN_BIT != 0);
         result
     }
 
@@ -859,7 +875,7 @@ impl CPU {
         let operand = self.read_value(location);
         let anded = self.a & operand.0;
         let value = (anded >> 1)
-            | if self.read_flag(Flag::Carry) {
+            | if self.read_flag(StatusFlags::Carry) {
                 SIGN_BIT
             } else {
                 0
@@ -867,16 +883,16 @@ impl CPU {
 
         self.write_value(Location::A, value);
         self.set_flag(
-            Flag::Overflow,
+            StatusFlags::Overflow,
             ((value & 0b010000000) >> 1) != value & 0b00100000,
         );
-        if self.bcd_enabled() && self.read_flag(Flag::Decimal) {
+        if self.bcd_enabled() && self.read_flag(StatusFlags::Decimal) {
             self.set_flag(
-                Flag::Carry,
+                StatusFlags::Carry,
                 (operand.0 & 0xF0).wrapping_add(operand.0 & 0x10) > 0x50,
             );
         } else {
-            self.set_flag(Flag::Carry, value & 0b01000000 != 0);
+            self.set_flag(StatusFlags::Carry, value & 0b01000000 != 0);
         }
 
         (location.page_boundary(), Branch::NotTaken)
@@ -887,9 +903,9 @@ impl CPU {
         let orig = self.a & self.read_value(location).0;
         let value = orig >> 1;
 
-        self.set_flag(Flag::Negative, false);
-        self.set_flag(Flag::Carry, orig & 1 != 0);
-        self.set_flag(Flag::Zero, value == 0);
+        self.set_flag(StatusFlags::Negative, false);
+        self.set_flag(StatusFlags::Carry, orig & 1 != 0);
+        self.set_flag(StatusFlags::Zero, value == 0);
 
         self.a = value;
         (location.page_boundary(), Branch::NotTaken)
@@ -901,9 +917,9 @@ impl CPU {
 
         let diff = self.a.wrapping_sub(value);
 
-        self.set_flag(Flag::Negative, diff & SIGN_BIT != 0);
-        self.set_flag(Flag::Zero, diff == 0);
-        self.set_flag(Flag::Carry, value <= self.a);
+        self.set_flag(StatusFlags::Negative, diff & SIGN_BIT != 0);
+        self.set_flag(StatusFlags::Zero, diff == 0);
+        self.set_flag(StatusFlags::Carry, value <= self.a);
 
         (
             self.write_value_without_flags(location, value),
@@ -915,18 +931,22 @@ impl CPU {
         let location = self.get_location(mode);
         let m = self.read_value(location).0.wrapping_add(1);
 
-        let borrow = if self.read_flag(Flag::Carry) { 0 } else { 1 };
+        let borrow = if self.read_flag(StatusFlags::Carry) {
+            0
+        } else {
+            1
+        };
 
         let tmp: u16 = (self.a as u16).wrapping_sub(m as u16).wrapping_sub(borrow);
 
-        self.set_flag(Flag::Negative, tmp & (SIGN_BIT as u16) != 0);
-        self.set_flag(Flag::Zero, tmp & LOW_BYTE_MASK == 0);
+        self.set_flag(StatusFlags::Negative, tmp & (SIGN_BIT as u16) != 0);
+        self.set_flag(StatusFlags::Zero, tmp & LOW_BYTE_MASK == 0);
         self.set_flag(
-            Flag::Overflow,
+            StatusFlags::Overflow,
             (self.a as u16 ^ tmp) & SIGN_BIT as u16 != 0 && (self.a ^ m) & SIGN_BIT != 0,
         );
 
-        self.set_flag(Flag::Carry, tmp < 0x0100);
+        self.set_flag(StatusFlags::Carry, tmp < 0x0100);
 
         self.write_value_without_flags(Location::A, (tmp & 0xFF) as u8);
         (
@@ -988,9 +1008,14 @@ impl CPU {
     fn rla(&mut self, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
         let orig = self.read_value(location).0;
-        let m = (orig << 1) | if self.read_flag(Flag::Carry) { 1 } else { 0 };
+        let m = (orig << 1)
+            | if self.read_flag(StatusFlags::Carry) {
+                1
+            } else {
+                0
+            };
 
-        self.set_flag(Flag::Carry, orig & SIGN_BIT != 0);
+        self.set_flag(StatusFlags::Carry, orig & SIGN_BIT != 0);
         self.write_value(Location::A, self.a & m);
         (
             self.write_value_without_flags(location, m),
@@ -1002,26 +1027,26 @@ impl CPU {
         let location = self.get_location(mode);
         let orig = self.read_value(location).0;
         let m = (orig >> 1)
-            | if self.read_flag(Flag::Carry) {
+            | if self.read_flag(StatusFlags::Carry) {
                 SIGN_BIT
             } else {
                 0
             };
 
-        self.set_flag(Flag::Carry, orig & 1 != 0);
+        self.set_flag(StatusFlags::Carry, orig & 1 != 0);
 
         let value = (self.a as u16)
             .wrapping_add(m as u16)
             .wrapping_add((orig & 1) as u16);
 
-        if self.bcd_enabled() && self.read_flag(Flag::Decimal) {
-            self.set_flag(Flag::Carry, value > 0x99);
+        if self.bcd_enabled() && self.read_flag(StatusFlags::Decimal) {
+            self.set_flag(StatusFlags::Carry, value > 0x99);
         } else {
-            self.set_flag(Flag::Carry, value > 0xFF);
+            self.set_flag(StatusFlags::Carry, value > 0xFF);
         }
 
         self.set_flag(
-            Flag::Overflow,
+            StatusFlags::Overflow,
             (self.a ^ m) & SIGN_BIT == 0 && (self.a as u16 ^ value) & SIGN_BIT as u16 != 0,
         );
 
@@ -1036,7 +1061,7 @@ impl CPU {
         let location = self.get_location(mode);
         let value = (self.a & self.x).wrapping_sub(self.read_value(location).0);
 
-        self.set_flag(Flag::Carry, (value & SIGN_BIT) == 0);
+        self.set_flag(StatusFlags::Carry, (value & SIGN_BIT) == 0);
 
         (self.write_value(Location::X, value), Branch::NotTaken)
     }
@@ -1076,7 +1101,7 @@ impl CPU {
         let m = orig << 1;
 
         self.write_value_without_flags(location, m);
-        self.set_flag(Flag::Carry, orig & SIGN_BIT != 0);
+        self.set_flag(StatusFlags::Carry, orig & SIGN_BIT != 0);
         self.write_value(Location::A, self.a | m);
         (location.page_boundary(), Branch::NotTaken)
     }
@@ -1087,7 +1112,7 @@ impl CPU {
         let m = orig >> 1;
 
         self.write_value_without_flags(location, m);
-        self.set_flag(Flag::Carry, orig & 1 != 0);
+        self.set_flag(StatusFlags::Carry, orig & 1 != 0);
         self.write_value(Location::A, self.a ^ m);
         (location.page_boundary(), Branch::NotTaken)
     }
