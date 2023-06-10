@@ -24,6 +24,10 @@ const NANOS_PER_FRAME: u64 = 16666666;
 
 const NES_WIDTH: usize = 256;
 const NES_HEIGHT: usize = 240;
+const SCREEN_SCALE: usize = 3;
+const SCREEN_HEIGHT: usize = 240 * SCREEN_SCALE;
+// CRT TV aspect ratio of 4/3
+const SCREEN_WIDTH: usize = SCREEN_HEIGHT * 4 / 3;
 
 fn main() -> Result<()> {
     let buffer = Rc::new(RefCell::new(vec![0; NES_WIDTH * NES_HEIGHT]));
@@ -40,13 +44,13 @@ fn main() -> Result<()> {
         scale: Scale::FitScreen,
         title: true,
         resize: true,
-        scale_mode: ScaleMode::AspectRatioStretch,
+        scale_mode: ScaleMode::Stretch,
         topmost: false,
         transparency: false,
         none: false,
     };
 
-    let mut window = Window::new("NES RS", NES_WIDTH * 3, NES_HEIGHT * 3, opts)?;
+    let mut window = Window::new("NES RS", SCREEN_WIDTH, SCREEN_HEIGHT, opts)?;
     let render_clone = buffer.clone();
 
     let renderer = Box::new(move |x, y, r, g, b| {
@@ -91,7 +95,7 @@ fn main() -> Result<()> {
         }
         next_frame += frame_time;
 
-        const DISPLAY_FRAME_RATE: bool = true;
+        const DISPLAY_FRAME_RATE: bool = false;
 
         if DISPLAY_FRAME_RATE {
             frame += 1.0;
