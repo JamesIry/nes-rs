@@ -18,19 +18,9 @@ pub mod nes;
 pub mod ram;
 
 /**
- * Master clock is 236.25/11, or 945/44 Mhz
- * PPU is 1/4 of master clock, so 945/176 Mhz
- * If we target 60 frames/second then thats
- * 945000000 / 10560, or
- * 984375 / 11, cycles per frame
- * That's 89488 7/11 cycles per frame
- * let's call it 89489
+ * 60 frames a sec is so many nanos per frame
  */
-const CYCLES_PER_FRAME: u32 = 89489;
-/**
- * 30 frames a sec is so many nanos per frame
- */
-const NANOS_PER_FRAME: u64 = 33333333;
+const NANOS_PER_FRAME: u64 = 16666666;
 
 const NES_WIDTH: usize = 256;
 const NES_HEIGHT: usize = 240;
@@ -91,9 +81,7 @@ fn main() -> Result<()> {
 
         joypad1.as_ref().borrow_mut().set_buttons(input);
 
-        for _ in 0..CYCLES_PER_FRAME {
-            nes.clock();
-        }
+        while !nes.clock() {}
         let now = Instant::now();
 
         window.update_with_buffer(&buffer.as_ref().borrow(), NES_WIDTH, NES_HEIGHT)?;
@@ -101,14 +89,14 @@ fn main() -> Result<()> {
         if now < next_frame {
             thread::sleep(next_frame - now);
         }
+        next_frame += frame_time;
 
-        const DISPLAY_FRAME_RATE: bool = false;
+        const DISPLAY_FRAME_RATE: bool = true;
 
         if DISPLAY_FRAME_RATE {
             frame += 1.0;
 
             println!("Frames/sec: {}", frame / (now - start).as_secs_f32());
-            next_frame += frame_time;
         }
     }
 

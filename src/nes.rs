@@ -82,7 +82,7 @@ impl NES {
         self.tick = 0;
     }
 
-    pub fn clock(&mut self) {
+    pub fn clock(&mut self) -> bool {
         if self.tick == 0 {
             {
                 let input1 = self.controller1.borrow().read_value();
@@ -96,7 +96,8 @@ impl NES {
             self.cpu.as_ref().borrow_mut().clock();
         }
 
-        if self.ppu.as_ref().borrow_mut().clock() {
+        let (end_of_frame, nmi) = self.ppu.as_ref().borrow_mut().clock();
+        if nmi {
             self.cpu.as_ref().borrow_mut().nmi();
         }
 
@@ -104,6 +105,8 @@ impl NES {
         if self.tick == 3 {
             self.tick = 0;
         }
+
+        end_of_frame
     }
 
     pub fn load_cartridge(&mut self, cartridge_name: String) -> Result<()> {

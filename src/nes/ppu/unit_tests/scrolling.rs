@@ -25,14 +25,14 @@ fn test_x_scroll() {
 
     ppu.tick = 256;
     ppu.scan_line = -1;
-    assert!(!ppu.clock());
+    assert_eq!((false, false), ppu.clock());
 
     // x should be incremented. y should be incremented with a wrap
     assert_eq!(14, ppu.vram_address.get_coarse_x());
     assert_eq!(0, ppu.vram_address.get_y());
     assert_eq!(2, ppu.vram_address.get_nametable_bits());
 
-    assert!(!ppu.clock());
+    assert_eq!((false, false), ppu.clock());
 
     // now force y back to something weird to make sure it gets updated to 0 eventually
     ppu.vram_address.set_y(87);
@@ -42,7 +42,7 @@ fn test_x_scroll() {
         assert_eq!(0, ppu.vram_address.get_coarse_x());
         assert_eq!(87, ppu.vram_address.get_y());
         assert_eq!(2, ppu.vram_address.get_nametable_bits());
-        assert!(!ppu.clock());
+        assert_eq!((false, false), ppu.clock());
     }
 
     // set temp_x to something new, should have no effect until end of next line
@@ -55,7 +55,7 @@ fn test_x_scroll() {
         assert_eq!(0, ppu.vram_address.get_coarse_x());
         assert_eq!(0, ppu.vram_address.get_y());
         assert_eq!(0, ppu.vram_address.get_nametable_bits());
-        assert!(!ppu.clock());
+        assert_eq!((false, false), ppu.clock());
     }
 
     // set temp_y to something new, should have no effect for a bunch of ticks
@@ -68,7 +68,7 @@ fn test_x_scroll() {
         assert_eq!(1, ppu.vram_address.get_coarse_x());
         assert_eq!(0, ppu.vram_address.get_y());
         assert_eq!(0, ppu.vram_address.get_nametable_bits());
-        assert!(!ppu.clock());
+        assert_eq!((false, false), ppu.clock());
     }
 
     // x = 2
@@ -76,21 +76,21 @@ fn test_x_scroll() {
         assert_eq!(2, ppu.vram_address.get_coarse_x());
         assert_eq!(0, ppu.vram_address.get_y());
         assert_eq!(0, ppu.vram_address.get_nametable_bits());
-        assert!(!ppu.clock());
+        assert_eq!((false, false), ppu.clock());
     }
 
     // new scanline, tick 0 does nothing, so x still = 2
     assert_eq!(2, ppu.vram_address.get_coarse_x());
     assert_eq!(0, ppu.vram_address.get_y());
     assert_eq!(0, ppu.vram_address.get_nametable_bits());
-    assert!(!ppu.clock());
+    assert_eq!((false, false), ppu.clock());
 
     // just cruising for the rest of the visible line
     for i in 1..240 {
         assert_eq!((i / 8 + 2) as u8, ppu.vram_address.get_coarse_x(), "{}", i);
         assert_eq!(0, ppu.vram_address.get_y());
         assert_eq!(0, ppu.vram_address.get_nametable_bits());
-        assert!(!ppu.clock());
+        assert_eq!((false, false), ppu.clock());
     }
 
     // more cruising with a wrapped around x
@@ -103,21 +103,21 @@ fn test_x_scroll() {
         );
         assert_eq!(0, ppu.vram_address.get_y());
         assert_eq!(1, ppu.vram_address.get_nametable_bits());
-        assert!(!ppu.clock());
+        assert_eq!((false, false), ppu.clock());
     }
 
     // y should now be incremented
     assert_eq!(2, ppu.vram_address.get_coarse_x());
     assert_eq!(1, ppu.vram_address.get_y());
     assert_eq!(1, ppu.vram_address.get_nametable_bits());
-    assert!(!ppu.clock());
+    assert_eq!((false, false), ppu.clock());
 
     // x and nametable should be clobbered but then stay the same for a bunch of ticks
     for _ in 257..328 {
         assert_eq!(31, ppu.vram_address.get_coarse_x());
         assert_eq!(1, ppu.vram_address.get_y());
         assert_eq!(1, ppu.vram_address.get_nametable_bits());
-        assert!(!ppu.clock());
+        assert_eq!((false, false), ppu.clock());
     }
 
     // x inrementing should start again (with a wrap) and we're done with the line
@@ -125,7 +125,7 @@ fn test_x_scroll() {
         assert_eq!(((i - 328) as u8) / 8, ppu.vram_address.get_coarse_x());
         assert_eq!(1, ppu.vram_address.get_y());
         assert_eq!(0, ppu.vram_address.get_nametable_bits());
-        assert!(!ppu.clock());
+        assert_eq!((false, false), ppu.clock());
     }
 }
 
@@ -150,7 +150,13 @@ fn test_scroll_post_render() {
             assert_eq!(30, ppu.vram_address.get_coarse_x());
             assert_eq!(87, ppu.vram_address.get_y());
             assert_eq!(2, ppu.vram_address.get_nametable_bits());
-            assert_eq!(ppu.clock(), ppu.tick == 2 && ppu.scan_line == 241);
+            assert_eq!(
+                ppu.clock(),
+                (
+                    ppu.scan_line == -1 && ppu.tick == 0,
+                    ppu.tick == 2 && ppu.scan_line == 241
+                )
+            );
         }
     }
 }

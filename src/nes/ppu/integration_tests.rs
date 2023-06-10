@@ -49,9 +49,9 @@ fn test_dma() {
         cpu.as_ref().borrow_mut().clock();
         assert!(!(cpu.borrow().is_rdy()));
         assert_eq!(cycles, cpu.as_ref().borrow_mut().cycles());
-        assert!(!ppu.as_ref().borrow_mut().clock());
-        assert!(!ppu.as_ref().borrow_mut().clock());
-        assert!(!ppu.as_ref().borrow_mut().clock());
+        assert_eq!((false, false), ppu.as_ref().borrow_mut().clock());
+        assert_eq!((false, false), ppu.as_ref().borrow_mut().clock());
+        assert_eq!((false, false), ppu.as_ref().borrow_mut().clock());
     }
 
     apu.as_ref().borrow_mut().clock();

@@ -104,7 +104,7 @@ impl PPU {
     }
 
     #[must_use]
-    pub fn clock(&mut self) -> bool {
+    pub fn clock(&mut self) -> (bool, bool) {
         self.manage_bus_request();
         self.manage_status();
         if self.rendering_enabled() && self.scan_line < 240 {
@@ -113,8 +113,8 @@ impl PPU {
             self.manage_render();
             self.manage_scrolling();
         }
-        self.manage_tick();
-        self.manage_nmi()
+        let end_of_frame = self.manage_tick();
+        (end_of_frame, self.manage_nmi())
     }
 
     fn rendering_enabled(&self) -> bool {
@@ -546,21 +546,24 @@ impl PPU {
         }
     }
 
-    fn manage_tick(&mut self) {
+    fn manage_tick(&mut self) -> bool {
         // skip a tick on odd frames when rendering is enabled
         if self.scan_line == -1 && self.tick == 339 && !self.even_frame && self.rendering_enabled()
         {
             self.tick = 340;
         }
+        let mut end_of_frame = false;
         self.tick += 1;
         if self.tick == 341 {
             self.tick = 0;
             self.scan_line += 1;
             if self.scan_line == 261 {
+                end_of_frame = true;
                 self.scan_line = -1;
                 self.even_frame = !self.even_frame;
             }
         }
+        end_of_frame
     }
 
     fn read_palette(&self, addr: u16) -> u8 {
@@ -1273,7 +1276,7 @@ impl SpriteRowData {
     }
 
     fn get_pattern_address(&self, large_sprite_mode: bool, sprite_high_mode: bool, y: u16) -> u16 {
-        let mut y_offset = y - (self.y as u16);
+        let mut y_offset = y.wrapping_sub(self.y as u16);
 
         let sprite_high = if large_sprite_mode {
             y_offset > 7
@@ -1282,8 +1285,8 @@ impl SpriteRowData {
         };
 
         if self.get_vertical_flip() {
-            let sprite_height = if large_sprite_mode { 16 } else { 8 };
-            y_offset = sprite_height - y_offset - 1;
+            let max_sprite_height: u16 = if large_sprite_mode { 15 } else { 7 };
+            y_offset = max_sprite_height.wrapping_sub(y_offset);
         }
 
         /*
