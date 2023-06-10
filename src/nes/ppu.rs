@@ -22,6 +22,8 @@ const PALETTE_START: u16 = 0x3000;
 const PALETTE_END: u16 = 0xFFFF;
 const PALETTE_SIZE: usize = 0x0020;
 const PALETTE_MASK: u16 = 0x001F;
+const PRIMARY_OAM_SIZE: usize = 0x0100;
+const SECONDARY_OAM_SIZE: usize = 0x0080;
 
 // blargg's power on palette values. why not?
 const INITIAL_PALETTE_VALUES: [u8; PALETTE_SIZE] = [
@@ -41,8 +43,8 @@ pub struct PPU {
 
     bus: Bus,
 
-    primary_oam: OAMData,
-    secondary_oam: SpriteRowSet,
+    primary_oam: OAMData<PRIMARY_OAM_SIZE>,
+    secondary_oam: OAMData<SECONDARY_OAM_SIZE>,
     sprite_row_data: SpriteRowSet,
 
     palettes: [u8; PALETTE_SIZE],
@@ -78,7 +80,7 @@ impl PPU {
             renderer,
             bus: Bus::new(),
             primary_oam: OAMData::new(),
-            secondary_oam: SpriteRowSet::new(),
+            secondary_oam: OAMData::new(),
             sprite_row_data: SpriteRowSet::new(),
             ctrl_high_register: 0,
             mask_register: 0,
@@ -135,7 +137,7 @@ impl PPU {
         self.write_toggle = false;
         self.vram_address = VramAddress::new();
         self.bg_shift_registers = BGShiftRegisterSet::new();
-        self.secondary_oam = SpriteRowSet::new();
+        self.secondary_oam = OAMData::new();
         self.sprite_row_data = SpriteRowSet::new();
         self.bus_request = BusRequest::None;
 
@@ -217,8 +219,9 @@ impl PPU {
                 self.primary_oam.load_addr(0);
                 self.primary_oam.read_enabled = false;
 
-                self.secondary_oam.set_current_sprite(0);
+                self.secondary_oam.load_addr(0);
                 self.secondary_oam.write_enabled = true;
+                self.secondary_oam.has_sprite0 = false;
             }
             t if 1 <= t && t <= 64 => {
                 match t % 2 {
@@ -237,7 +240,7 @@ impl PPU {
                 if t == 65 {
                     self.primary_oam.load_addr(0);
                     self.primary_oam.read_enabled = true;
-                    self.secondary_oam.set_current_sprite(0);
+                    self.secondary_oam.load_addr(0);
                     self.sprite_eval_state = SpriteEvalState::ReadY;
                 }
 
@@ -268,7 +271,10 @@ impl PPU {
                         {
                             if !self.secondary_oam.write_enabled {
                                 self.set_status_flag(StatusFlag::SpriteOverflow, true);
+                            } else if self.primary_oam.addr < 4 {
+                                self.secondary_oam.has_sprite0 = true;
                             }
+
                             self.secondary_oam.inc_addr();
                             self.sprite_eval_state = SpriteEvalState::ReadTileIndex;
                         } else {
@@ -324,10 +330,24 @@ impl PPU {
             }
             257 => {
                 self.primary_oam.load_addr(0);
-                self.secondary_oam.set_current_sprite(0);
+                self.secondary_oam.load_addr(0);
+                self.sprite_row_data.set_current_sprite(0);
 
                 // latch seondary_oam down into the sprite data we're going to render
-                self.sprite_row_data = self.secondary_oam;
+                for i in 0..8 {
+                    self.sprite_row_data.current_sprite().sprite0 =
+                        i == 0 && self.secondary_oam.has_sprite0;
+                    self.sprite_row_data.current_sprite().y = self.secondary_oam.read_data();
+                    self.secondary_oam.inc_addr();
+                    self.sprite_row_data.current_sprite().tile_id = self.secondary_oam.read_data();
+                    self.secondary_oam.inc_addr();
+                    self.sprite_row_data.current_sprite().attributes =
+                        self.secondary_oam.read_data();
+                    self.secondary_oam.inc_addr();
+                    self.sprite_row_data.current_sprite().x = self.secondary_oam.read_data() as i16;
+                    self.secondary_oam.inc_addr();
+                    self.sprite_row_data.inc_sprite();
+                }
             }
             t if 258 <= t && t <= 340 => {}
 
@@ -409,7 +429,7 @@ impl PPU {
                             self.sprite_row_data
                                 .current_sprite()
                                 .set_pattern_high(self.data_buffer);
-                            self.sprite_row_data.move_to_next_sprite();
+                            self.sprite_row_data.inc_sprite();
                         }
                     } else if 0 < self.tick {
                         self.bg_shift_registers
@@ -451,21 +471,21 @@ impl PPU {
                     .get_palette_number_and_color(self.temporary_vram_address.fine_x)
             };
 
-            let (sprite_number, mut sprite_palette, mut sprite_color, bg_priority) = {
-                if let Some((sprite_number, sprite)) = self.sprite_row_data.first_live() {
+            let (sprite0, mut sprite_palette, mut sprite_color, bg_priority) = {
+                if let Some(sprite) = self.sprite_row_data.first_opaque() {
                     let (palette_number, color) = sprite.get_palette_number_and_color();
                     (
-                        sprite_number,
+                        sprite.sprite0,
                         palette_number,
                         color,
                         sprite.get_bg_priority(),
                     )
                 } else {
-                    (0, 0, 0, true)
+                    (false, 0x0010, 0, true)
                 }
             };
 
-            if bg_color != 0 && sprite_color != 0 && sprite_number == 0 {
+            if bg_color != 0 && sprite_color != 0 && sprite0 {
                 self.status_register |= StatusFlag::Sprite0Hit;
             }
 
@@ -1161,10 +1181,10 @@ enum BusRequest {
     None,
 }
 
-struct OAMData {
+struct OAMData<const SIZE: usize> {
     addr: u8,
     /**
-     * 256/4 = 64 sprites
+     * SIZE/4 = 64 sprites
      * 0 - Y position (-1 because sprites are evaluated 1 scanline ahead)
      * 1 - Tile number
      * 2 - Attributes
@@ -1177,29 +1197,33 @@ struct OAMData {
      *     +------------ Flip sprite vertically
      * 3 - X position
      */
-    table: [u8; 0x0100],
+    table: [u8; SIZE],
     read_enabled: bool,
     write_enabled: bool,
+    addr_mask: u8,
+    has_sprite0: bool,
 }
 
-impl OAMData {
+impl<const SIZE: usize> OAMData<SIZE> {
     fn new() -> Self {
         Self {
             addr: 0,
-            table: [0; 0x0100],
+            table: [0; SIZE],
             read_enabled: true,
             write_enabled: true,
+            addr_mask: (SIZE - 1) as u8,
+            has_sprite0: false,
         }
     }
 
     fn load_addr(&mut self, addr: u8) -> u8 {
         let old = self.addr;
-        self.addr = addr;
+        self.addr = addr & self.addr_mask;
         old
     }
 
     fn inc_addr(&mut self) {
-        self.addr = self.addr.wrapping_add(1);
+        self.addr = self.addr.wrapping_add(1) & self.addr_mask;
     }
 
     fn write_data(&mut self, data: u8) -> u8 {
@@ -1217,6 +1241,10 @@ impl OAMData {
             0xFF
         }
     }
+
+    fn is_full(&self) -> bool {
+        self.addr as usize == SIZE - 1
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1225,6 +1253,7 @@ struct SpriteRowData {
     tile_id: u8,
     attributes: u8,
     x: i16,
+    sprite0: bool,
 
     pattern_high: u8,
     pattern_low: u8,
@@ -1236,6 +1265,7 @@ impl SpriteRowData {
             tile_id: 0xFF,
             attributes: 0xFF,
             x: 0xFF,
+            sprite0: false,
 
             pattern_high: 0xFF,
             pattern_low: 0xFF,
@@ -1356,7 +1386,7 @@ impl Default for SpriteRowData {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct SpriteRowSet {
     sprite_data: [SpriteRowData; 8],
-    addr: usize,
+    sprite_number: usize,
     write_enabled: bool,
 }
 
@@ -1364,25 +1394,17 @@ impl SpriteRowSet {
     fn new() -> Self {
         Self {
             sprite_data: [SpriteRowData::new(); 8],
-            addr: 0,
+            sprite_number: 0,
             write_enabled: true,
         }
     }
 
     fn set_current_sprite(&mut self, n: usize) {
-        self.addr = n * 4;
+        self.sprite_number = n;
     }
 
-    fn inc_addr(&mut self) {
-        self.addr = (self.addr + 1) & 0b00000111;
-    }
-
-    fn move_to_next_sprite(&mut self) {
-        self.addr = (self.addr + 4) & 0b00000111;
-    }
-
-    fn is_full(&self) -> bool {
-        self.addr == 31
+    fn inc_sprite(&mut self) {
+        self.sprite_number = (self.sprite_number + 1) & 0b00000111;
     }
 
     fn shift(&mut self) {
@@ -1391,39 +1413,14 @@ impl SpriteRowSet {
         }
     }
 
-    fn first_live(&self) -> Option<(usize, SpriteRowData)> {
+    fn first_opaque(&self) -> Option<SpriteRowData> {
         self.sprite_data
             .into_iter()
-            .enumerate()
-            .find(|(_, data)| data.live())
+            .find(|data| data.live() && data.get_pixel_color_number() != 0)
     }
 
     fn current_sprite(&mut self) -> &mut SpriteRowData {
-        &mut self.sprite_data[self.addr / 4]
-    }
-
-    fn read_data(&mut self) -> u8 {
-        match self.addr % 4 {
-            0 => self.current_sprite().y,
-            1 => self.current_sprite().tile_id,
-            2 => self.current_sprite().attributes,
-            3 => self.current_sprite().x as u8,
-            _ => unreachable!("impossible address {}", self.addr),
-        }
-    }
-
-    fn write_data(&mut self, data: u8) -> u8 {
-        let old = self.read_data();
-        if self.write_enabled {
-            match self.addr % 4 {
-                0 => self.current_sprite().y = data,
-                1 => self.current_sprite().tile_id = data,
-                2 => self.current_sprite().attributes = data,
-                3 => self.current_sprite().x = data as i16,
-                _ => unreachable!("impossible address {}", self.addr),
-            }
-        }
-        old
+        &mut self.sprite_data[self.sprite_number]
     }
 }
 

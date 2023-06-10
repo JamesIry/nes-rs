@@ -1,6 +1,6 @@
-Ultimataly targeted to being an NES emulator. Now very much a work in progress.
+Ultimataly targeted to being an NES emulator. Now very much a work in progress. Mapper0/NROM games like Super Mario Bros should be playable but won't have sound. Other mapper types are still TBD.
 
-I've chosen Rust SDL2 as a base library which means an external dependency. [Check here for installation](https://github.com/Rust-SDL2/rust-sdl2#sdl20-development-libraries)
+I've chosen Rust SDL2 as a base library which means an external dependency. [Check here for installation](https://github.com/Rust-SDL2/rust-sdl2#sdl20-development-libraries). On my system, the only way to get acceptable performance is cargo run/build --release. Debug mode just won't cut it - PPU cycles take 10x as long under debug as they do under release.
 
 - [X] 6502
     - [X] Official opcodes
@@ -9,20 +9,21 @@ I've chosen Rust SDL2 as a base library which means an external dependency. [Che
     - [X] Core
     - [X] Mapper0/NROM
 - [X] Input
-    - [X] General controller support
+    - [X] General controller support infra
     - [X] Joypad
-- [ ] PPU
+- [X] PPU
     - [X] Registers
     - [X] Scrolling
     - [X] Background rendering
-    - [ ] Sprite rendering  (in progress)
-- [ ] ALU
+    - [X] Sprite rendering
+- [ ] APU
     - [X] Sprite DMA
-    - [ ] Sound DMA
+    - [ ] Sound DMA (in progress)
     - [ ] Sound
 - [ ] Detailed Timing
-    - Cycle correct 6502
-    - Fix NMI timing
+    - [ ] Cycle correct 6502
+    - [ ] Fix NMI timing
+    - [ ] DMA should only pause CPU on 'read' cycle
 - [ ] Other Mappers
     - [ ] Mapper1/MMC
     - [ ] Other MMC deriviatives
