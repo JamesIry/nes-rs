@@ -14,13 +14,18 @@ const ADDR_MASK: u16 = 0x401F;
 pub struct APU {
     cpu: Rc<RefCell<CPU>>,
     read_cycle: bool,
-    oam_dma_state: OamDmaState,
-    oam_dma_data: u8,
-    input_port_ctrl: u8,
-    input_port1: u8,
-    input_port2: u8,
     last_read: u8,
 
+    frame_counter: u16,
+    frame_counter_reset_state: FrameCounterResetState,
+
+    oam_dma_state: OamDmaState,
+    oam_dma_data: u8,
+
+    input_port1: u8,
+    input_port2: u8,
+
+    input_port_ctrl: u8,
     oam_dma_page: u8,
     input_registers: [u8; 2],
     sound_enable_register: SoundEnableFlags,
@@ -36,11 +41,16 @@ impl APU {
         Self {
             cpu,
             read_cycle: true,
+            last_read: 0xFF,
+
+            frame_counter: 0,
+            frame_counter_reset_state: FrameCounterResetState::None,
+
             oam_dma_state: OamDmaState::NoDma,
             oam_dma_data: 0,
+
             input_port1: 0,
             input_port2: 0,
-            last_read: 0xFF,
 
             oam_dma_page: 0xFF,
             input_port_ctrl: 0xFF,
@@ -54,12 +64,17 @@ impl APU {
         }
     }
 
-    pub fn clock(&mut self) {
+    #[must_use]
+    pub fn clock(&mut self) -> bool {
         self.read_cycle = !self.read_cycle;
 
         self.manage_input_ports();
 
         self.manage_oam_dma();
+        self.manage_frame_counter();
+
+        self.sound_enable_register
+            .contains(SoundEnableFlags::FrameInterrupt)
     }
 
     pub fn reset(&mut self) {
@@ -69,6 +84,9 @@ impl APU {
         self.input_port1 = 0;
         self.input_port2 = 0;
         self.last_read = 0;
+
+        self.frame_counter = 0;
+        self.frame_counter_reset_state = FrameCounterResetState::None;
 
         self.oam_dma_page = 0xFF;
         self.input_port_ctrl = 0xFF;
@@ -113,6 +131,106 @@ impl APU {
                 }
             }
         }
+    }
+
+    fn manage_frame_counter(&mut self) {
+        match (self.frame_counter_reset_state, self.read_cycle) {
+            (FrameCounterResetState::WaitingForRead, true) => {
+                self.frame_counter_reset_state = FrameCounterResetState::WaitingForWrite;
+                self.frame_counter += 1;
+            }
+
+            (FrameCounterResetState::WaitingForWrite, false) => {
+                self.frame_counter = 0;
+                if self
+                    .frame_counter_control
+                    .contains(FrameCounterFlags::FiveStepMode)
+                {
+                    self.clock_half_frame();
+                    self.clock_quarter_frame();
+                }
+                self.frame_counter_reset_state = FrameCounterResetState::None
+            }
+            _ => self.frame_counter += 1,
+        }
+
+        if !self
+            .frame_counter_control
+            .contains(FrameCounterFlags::FiveStepMode)
+        {
+            match self.frame_counter {
+                7457 => self.clock_quarter_frame(),
+                14913 => {
+                    self.clock_quarter_frame();
+                    self.clock_half_frame();
+                }
+                22371 => {
+                    self.clock_quarter_frame();
+                }
+                29828 => self.set_frame_interrupt(true),
+                29829 => {
+                    self.set_frame_interrupt(true);
+                    self.clock_quarter_frame();
+                    self.clock_half_frame();
+                }
+                29830 => {
+                    self.set_frame_interrupt(true);
+                    self.frame_counter = 0;
+                }
+                _ => (),
+            }
+        } else {
+            match self.frame_counter {
+                7457 => self.clock_quarter_frame(),
+                14913 => {
+                    self.clock_quarter_frame();
+                    self.clock_half_frame();
+                }
+                22371 => {
+                    self.clock_quarter_frame();
+                }
+                29829 => {
+                    self.clock_quarter_frame();
+                    self.clock_half_frame();
+                }
+                29830 => (), // "extra," do nothing
+                37281 => {
+                    self.clock_quarter_frame();
+                    self.clock_half_frame();
+                }
+                37282 => self.frame_counter = 0,
+                _ => (),
+            }
+        }
+    }
+
+    fn set_frame_interrupt(&mut self, value: bool) {
+        if value {
+            if !self
+                .frame_counter_control
+                .contains(FrameCounterFlags::IRQInhibit)
+            {
+                self.sound_enable_register
+                    .insert(SoundEnableFlags::FrameInterrupt);
+            }
+        } else {
+            self.sound_enable_register
+                .remove(SoundEnableFlags::FrameInterrupt);
+        }
+    }
+
+    fn clock_half_frame(&mut self) {
+        self.pulse_channels[0].half_frame_clock();
+        self.pulse_channels[1].half_frame_clock();
+        self.triangle_channel.half_frame_clock();
+        self.noise_channel.half_frame_clock();
+    }
+
+    fn clock_quarter_frame(&mut self) {
+        self.pulse_channels[0].quarter_frame_clock();
+        self.pulse_channels[1].quarter_frame_clock();
+        self.triangle_channel.quarter_frame_clock();
+        self.noise_channel.quarter_frame_clock();
     }
 
     fn read_oam_dma(&mut self, offset: u16) {
@@ -177,8 +295,7 @@ impl BusDevice for APU {
                     let result = status.bits()
                         | (self.sound_enable_register.bits() & 0b11000000)
                         | (self.last_read & 0b00100000);
-                    self.sound_enable_register
-                        .set(SoundEnableFlags::DMCInterrupt, false);
+                    self.set_frame_interrupt(false);
                     result
 
                     // note, this read doesn't not affect self.last_read
@@ -226,8 +343,10 @@ impl BusDevice for APU {
                 }
                 0x4015 => {
                     self.sound_enable_register = SoundEnableFlags::from_bits_truncate(
-                        (self.sound_enable_register.bits() & 0b01100000) | (data & 0b00011111),
+                        (self.sound_enable_register.bits() & 0b11100000) | (data & 0b00011111),
                     );
+                    self.sound_enable_register
+                        .set(SoundEnableFlags::DMCInterrupt, false);
                     0xFF // this is just to make nestest.rs happy
                 }
                 0x4016 => {
@@ -238,6 +357,13 @@ impl BusDevice for APU {
                 0x4017 => {
                     let old = self.frame_counter_control.bits();
                     self.frame_counter_control = FrameCounterFlags::from_bits_truncate(data);
+                    if self
+                        .frame_counter_control
+                        .contains(FrameCounterFlags::IRQInhibit)
+                    {
+                        self.set_frame_interrupt(false);
+                    }
+                    self.frame_counter_reset_state = FrameCounterResetState::WaitingForRead;
                     old
                 }
                 _ => 0xFF,
@@ -302,6 +428,9 @@ impl PulseChannel {
         }
     }
 
+    fn quarter_frame_clock(&mut self) {}
+    fn half_frame_clock(&mut self) {}
+
     fn get_length_counter(&self) -> u8 {
         (self.registers[3] & 0b11111000) >> 3
     }
@@ -329,6 +458,9 @@ impl TriangleChannel {
         }
     }
 
+    fn quarter_frame_clock(&mut self) {}
+    fn half_frame_clock(&mut self) {}
+
     fn get_length_counter(&self) -> u8 {
         (self.registers[3] & 0b11111000) >> 3
     }
@@ -355,6 +487,9 @@ impl NoiseChannel {
             registers: [0xFF; 4],
         }
     }
+
+    fn quarter_frame_clock(&mut self) {}
+    fn half_frame_clock(&mut self) {}
 
     fn get_length_counter(&self) -> u8 {
         (self.registers[3] & 0b11111000) >> 3
@@ -397,4 +532,11 @@ impl Channel for DMCChannel {
     fn read_register(&self, n: u8) -> u8 {
         self.registers[n as usize]
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FrameCounterResetState {
+    None,
+    WaitingForRead,
+    WaitingForWrite,
 }

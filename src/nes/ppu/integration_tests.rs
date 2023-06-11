@@ -42,10 +42,10 @@ fn test_dma() {
 
     ppu.as_ref().borrow_mut().write(0x2003, 0x02);
     apu.as_ref().borrow_mut().write(0x4014, 0x03);
-    apu.as_ref().borrow_mut().clock(); // process the write and clear cpu.rdy
+    let _ = apu.as_ref().borrow_mut().clock(); // process the write and clear cpu.rdy
 
     for _ in 0..513 {
-        apu.as_ref().borrow_mut().clock();
+        let _ = apu.as_ref().borrow_mut().clock();
         cpu.as_ref().borrow_mut().clock();
         assert!(!(cpu.borrow().is_rdy()));
         assert_eq!(cycles, cpu.as_ref().borrow_mut().cycles());
@@ -54,7 +54,7 @@ fn test_dma() {
         assert_eq!((false, false), ppu.as_ref().borrow_mut().clock());
     }
 
-    apu.as_ref().borrow_mut().clock();
+    let _ = apu.as_ref().borrow_mut().clock();
     assert!(cpu.borrow().is_rdy());
 
     for address in 0..0x0100 {

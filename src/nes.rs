@@ -91,8 +91,11 @@ impl NES {
                 let mut apu_borrowed = self.apu.as_ref().borrow_mut();
                 apu_borrowed.set_input_port1(input1);
                 apu_borrowed.set_input_port2(input2);
-                apu_borrowed.clock();
-            }
+                let irq = apu_borrowed.clock();
+                if irq {
+                    self.cpu.as_ref().borrow_mut().irq();
+                }
+            };
             self.cpu.as_ref().borrow_mut().clock();
         }
 
