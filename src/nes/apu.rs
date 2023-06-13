@@ -66,7 +66,7 @@ impl APU {
     }
 
     #[must_use]
-    pub fn clock(&mut self) -> bool {
+    pub fn clock(&mut self) -> (bool, f32) {
         self.read_cycle = !self.read_cycle;
 
         self.manage_input_ports();
@@ -74,8 +74,27 @@ impl APU {
         self.manage_oam_dma();
         self.manage_frame_counter();
 
-        self.sound_enable_register_high
-            .contains(SoundEnableFlags::FrameInterrupt)
+        let read_cycle = self.read_cycle;
+        let outputs = self.channel_set().map(|c| c.clock(read_cycle) as f32);
+        let pulse_out = if outputs[0] == 0.0 && outputs[1] == 0.0 {
+            0.0
+        } else {
+            95.88 / ((8128.0 / (outputs[0] + outputs[1])) + 100.0)
+        };
+
+        let tnd_out = if outputs[2] == 0.0 && outputs[3] == 0.0 && outputs[4] == 0.0 {
+            0.0
+        } else {
+            159.79
+                / (1.0 / (outputs[2] / 8227.0 + outputs[3] / 12241.0 + outputs[4] / 22638.0)
+                    + 100.0)
+        };
+
+        (
+            self.sound_enable_register_high
+                .contains(SoundEnableFlags::FrameInterrupt),
+            pulse_out + tnd_out,
+        )
     }
 
     pub fn reset(&mut self) {
@@ -225,17 +244,15 @@ impl APU {
     }
 
     fn clock_half_frame(&mut self) {
-        self.pulse_channel1.half_frame_clock();
-        self.pulse_channel2.half_frame_clock();
-        self.triangle_channel.half_frame_clock();
-        self.noise_channel.half_frame_clock();
+        for c in self.channel_set() {
+            c.half_frame_clock();
+        }
     }
 
     fn clock_quarter_frame(&mut self) {
-        self.pulse_channel1.quarter_frame_clock();
-        self.pulse_channel2.quarter_frame_clock();
-        self.triangle_channel.quarter_frame_clock();
-        self.noise_channel.quarter_frame_clock();
+        for c in self.channel_set() {
+            c.quarter_frame_clock();
+        }
     }
 
     fn read_oam_dma(&mut self, offset: u16) {
@@ -302,7 +319,7 @@ impl BusDevice for APU {
                     self.set_frame_interrupt(false);
                     result
 
-                    // note, this read doesn't not affect self.last_read
+                    // note, this read doesn't affect self.last_read
                 }
                 0x4016 => {
                     self.last_read = self.bus_read_input_register(0);
@@ -409,20 +426,20 @@ trait Channel {
     fn get_enabled_flag(&self) -> SoundEnableFlags;
     fn set_enabled(&mut self, value: bool);
     fn get_enabled(&self) -> bool;
+    fn quarter_frame_clock(&mut self);
+    fn clock(&mut self, read_cycle: bool) -> u8;
+    fn half_frame_clock(&mut self);
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 struct PulseChannel {
     envelope: Envelope,
     sweep: Sweep,
+    frequency_timer: FrequencyTimer,
+    length_counter: LengthCounter,
+    sequencer: PulseSequencer,
 
     enabled: bool,
-    duty: u8,
-
-    timer: u16,
-
-    length_counter_load: u8,
-    length_counter: u8,
 }
 
 impl PulseChannel {
@@ -430,21 +447,12 @@ impl PulseChannel {
         Self {
             envelope: Envelope::new(),
             sweep: Sweep::new(channel2),
+            frequency_timer: FrequencyTimer::new(true),
+            length_counter: LengthCounter::new(),
+            sequencer: PulseSequencer::new(),
 
             enabled: false,
-            length_counter_load: 0,
-            length_counter: 0,
-
-            duty: 0,
-            timer: 0,
         }
-    }
-
-    fn quarter_frame_clock(&mut self) {
-        self.envelope.quarter_frame_clock();
-    }
-    fn half_frame_clock(&mut self) {
-        self.timer = self.sweep.half_frame_clock(self.timer);
     }
 }
 impl Channel for PulseChannel {
@@ -452,7 +460,8 @@ impl Channel for PulseChannel {
         let old = self.read_register(n);
         match n {
             0 => {
-                self.duty = (value & 0b11000000) >> 6;
+                self.sequencer.set_duty_cycle((value & 0b11000000) >> 6);
+                self.length_counter.halted = value & 0b00100000 != 0; // note, same bit
                 self.envelope.loop_enable = value & 0b00100000 != 0;
                 self.envelope.constant_volume = value & 0b00010000 != 0;
                 self.envelope.period = value & 0b00001111;
@@ -464,12 +473,16 @@ impl Channel for PulseChannel {
                 self.sweep.shift_count = value & 0b00000111;
                 self.sweep.start = true;
             }
-            2 => self.timer = (self.timer & 0b1111111100000000) | value as u16,
+            2 => {
+                self.frequency_timer.period =
+                    (self.frequency_timer.period & 0b1111111100000000) | value as u16
+            }
             3 => {
-                self.timer =
-                    (self.timer & 0b0000000011111111) | (((value & 0b00000111) as u16) << 8);
-                self.length_counter_load = (value & 0b11111000) >> 3;
-                self.envelope.start_flag = true;
+                self.frequency_timer.period = (self.frequency_timer.period & 0b0000000011111111)
+                    | (((value & 0b00000111) as u16) << 8);
+                self.length_counter.period_index = (value & 0b11111000) >> 3;
+                self.envelope.start = true;
+                self.sequencer.start = true;
             }
             _ => unreachable!("Invalid register {}", n),
         }
@@ -479,9 +492,9 @@ impl Channel for PulseChannel {
     fn read_register(&self, n: u8) -> u8 {
         match n {
             0 => {
-                ((self.duty << 6) & 0b11000000)
+                ((self.sequencer.duty_cycle << 6) & 0b11000000)
                     | (if self.envelope.loop_enable {
-                        0b00010000
+                        0b00100000
                     } else {
                         0
                     })
@@ -498,10 +511,10 @@ impl Channel for PulseChannel {
                     | (if self.sweep.negative { 0b00001000 } else { 0 })
                     | (self.sweep.shift_count & 0b00000111)
             }
-            2 => (self.timer & 0b0000000011111111) as u8,
+            2 => (self.frequency_timer.period & 0b0000000011111111) as u8,
             3 => {
-                ((self.length_counter_load << 3) & 0b11111000)
-                    | (((self.timer >> 8) & 0b00000111) as u8)
+                ((self.length_counter.period_index << 3) & 0b11111000)
+                    | (((self.frequency_timer.period >> 8) & 0b00000111) as u8)
             }
             _ => unreachable!("Invalid register {}", n),
         }
@@ -509,13 +522,13 @@ impl Channel for PulseChannel {
 
     fn set_enabled(&mut self, value: bool) {
         if !value {
-            self.length_counter = 0;
+            self.length_counter.value = 0;
         }
         self.enabled = value
     }
 
     fn get_enabled(&self) -> bool {
-        self.enabled && self.length_counter != 0
+        self.enabled && self.length_counter.value != 0
     }
 
     fn get_enabled_flag(&self) -> SoundEnableFlags {
@@ -524,6 +537,28 @@ impl Channel for PulseChannel {
         } else {
             SoundEnableFlags::Pulse1
         }
+    }
+
+    fn clock(&mut self, read_cycle: bool) -> u8 {
+        if self.frequency_timer.clock(read_cycle) {
+            self.sequencer.advance_position();
+        }
+
+        if self.sweep.gate() && self.sequencer.gate() && self.length_counter.gate() {
+            self.envelope.output
+        } else {
+            0
+        }
+    }
+
+    fn quarter_frame_clock(&mut self) {
+        self.envelope.quarter_frame_clock();
+    }
+
+    fn half_frame_clock(&mut self) {
+        self.frequency_timer.period = self.sweep.half_frame_clock(self.frequency_timer.period);
+
+        self.length_counter.half_frame_clock();
     }
 }
 
@@ -543,9 +578,6 @@ impl TriangleChannel {
             length_counter_load: 0,
         }
     }
-
-    fn quarter_frame_clock(&mut self) {}
-    fn half_frame_clock(&mut self) {}
 }
 impl Channel for TriangleChannel {
     fn set_register(&mut self, n: u8, value: u8) -> u8 {
@@ -572,6 +604,12 @@ impl Channel for TriangleChannel {
     fn get_enabled_flag(&self) -> SoundEnableFlags {
         SoundEnableFlags::Triangle
     }
+
+    fn clock(&mut self, _read_cycle: bool) -> u8 {
+        0
+    }
+    fn quarter_frame_clock(&mut self) {}
+    fn half_frame_clock(&mut self) {}
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -590,9 +628,6 @@ impl NoiseChannel {
             length_counter: 0,
         }
     }
-
-    fn quarter_frame_clock(&mut self) {}
-    fn half_frame_clock(&mut self) {}
 }
 impl Channel for NoiseChannel {
     fn set_register(&mut self, n: u8, value: u8) -> u8 {
@@ -600,7 +635,7 @@ impl Channel for NoiseChannel {
         self.registers[n as usize] = value;
 
         if n == 3 {
-            self.envelope.start_flag = true;
+            self.envelope.start = true;
         }
         old
     }
@@ -623,6 +658,12 @@ impl Channel for NoiseChannel {
     fn get_enabled_flag(&self) -> SoundEnableFlags {
         SoundEnableFlags::Noise
     }
+
+    fn clock(&mut self, _read_cycle: bool) -> u8 {
+        0
+    }
+    fn quarter_frame_clock(&mut self) {}
+    fn half_frame_clock(&mut self) {}
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -668,6 +709,12 @@ impl Channel for DMCChannel {
     fn get_enabled_flag(&self) -> SoundEnableFlags {
         SoundEnableFlags::DMC
     }
+
+    fn clock(&mut self, _read_cycle: bool) -> u8 {
+        0
+    }
+    fn quarter_frame_clock(&mut self) {}
+    fn half_frame_clock(&mut self) {}
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -679,7 +726,7 @@ enum FrameCounterResetState {
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 struct Envelope {
-    start_flag: bool,
+    start: bool,
     divider: u8,
     loop_enable: bool,
     constant_volume: bool,
@@ -691,7 +738,7 @@ struct Envelope {
 impl Envelope {
     fn new() -> Self {
         Self {
-            start_flag: true,
+            start: true,
             divider: 0,
             loop_enable: false,
             constant_volume: false,
@@ -702,8 +749,8 @@ impl Envelope {
     }
 
     fn quarter_frame_clock(&mut self) {
-        if self.start_flag {
-            self.start_flag = false;
+        if self.start {
+            self.start = false;
             self.decay_level = 15;
             self.divider = self.decay_level;
         } else if self.divider == 0 {
@@ -781,5 +828,115 @@ impl Sweep {
         }
 
         result
+    }
+
+    fn gate(&self) -> bool {
+        !self.muting
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct FrequencyTimer {
+    every_other_clock: bool,
+    period: u16,
+    value: u16,
+}
+
+impl FrequencyTimer {
+    fn new(every_other_clock: bool) -> Self {
+        Self {
+            every_other_clock,
+            period: 0,
+            value: 0,
+        }
+    }
+
+    fn clock(&mut self, read_cycle: bool) -> bool {
+        let mut result = false;
+        if !self.every_other_clock || !read_cycle {
+            if self.value == 0 {
+                self.value = self.period;
+                result = true;
+            } else {
+                self.value -= 1;
+            }
+        }
+        result
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct LengthCounter {
+    period_index: u8,
+    value: u8,
+    halted: bool,
+}
+
+impl LengthCounter {
+    fn new() -> Self {
+        Self {
+            period_index: 0,
+            value: 0,
+            halted: false,
+        }
+    }
+
+    fn half_frame_clock(&mut self) {
+        const PERIOD_LOOKUP: [u8; 32] = [
+            10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20,
+            96, 22, 192, 24, 72, 26, 16, 28, 32, 30,
+        ];
+
+        if !self.halted {
+            if self.value == 0 {
+                self.value = PERIOD_LOOKUP[self.period_index as usize];
+            } else {
+                self.value -= 1;
+            }
+        }
+    }
+
+    fn gate(&self) -> bool {
+        self.value != 0
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct PulseSequencer {
+    duty_cycle: u8,
+    sequence: u8,
+    position: u8,
+    start: bool,
+}
+
+const PULSE_SEQUENCE_TABLE: [u8; 4] = [0b00000001, 0b00000011, 0b00001111, 0b11111100];
+impl PulseSequencer {
+    fn new() -> Self {
+        Self {
+            duty_cycle: 0,
+            sequence: PULSE_SEQUENCE_TABLE[0],
+            position: 0,
+            start: false,
+        }
+    }
+
+    fn advance_position(&mut self) {
+        if self.start {
+            self.start = false;
+            self.position = 0;
+        } else if self.position == 0 {
+            self.position = 7;
+        } else {
+            self.position -= 1;
+        }
+    }
+
+    fn set_duty_cycle(&mut self, duty_cycle: u8) {
+        self.duty_cycle = duty_cycle;
+        self.sequence = PULSE_SEQUENCE_TABLE[duty_cycle as usize];
+    }
+
+    fn gate(&self) -> bool {
+        ((self.sequence >> self.position) & 1) != 0
     }
 }
