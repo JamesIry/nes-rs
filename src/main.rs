@@ -1,4 +1,5 @@
 use anyhow::Result;
+use blip_buf::BlipBuf;
 use minifb::{Key, Scale, ScaleMode, Window, WindowOptions};
 use nes::{controllers::JoyPad, NES};
 use std::collections::HashSet;
@@ -30,7 +31,11 @@ const SCREEN_HEIGHT: usize = 240 * SCREEN_SCALE;
 const SCREEN_WIDTH: usize = SCREEN_HEIGHT * 4 / 3;
 
 fn main() -> Result<()> {
-    let buffer = Rc::new(RefCell::new(vec![0; NES_WIDTH * NES_HEIGHT]));
+    let mut blip = BlipBuf::new(29781);
+    let mut audio_buffer = [0; 29781];
+    blip.set_rates(5369318.0, 48000.0);
+
+    let screen_buffer = Rc::new(RefCell::new(vec![0; NES_WIDTH * NES_HEIGHT]));
 
     let args = env::args().collect::<Vec<String>>();
     let cartridge_name = if args.len() > 1 {
@@ -51,7 +56,7 @@ fn main() -> Result<()> {
     };
 
     let mut window = Window::new("NES RS", SCREEN_WIDTH, SCREEN_HEIGHT, opts)?;
-    let render_clone = buffer.clone();
+    let render_clone = screen_buffer.clone();
 
     let renderer = Box::new(move |x, y, r, g, b| {
         let mut buffer = render_clone.as_ref().borrow_mut();
@@ -85,10 +90,28 @@ fn main() -> Result<()> {
 
         joypad1.as_ref().borrow_mut().set_buttons(input);
 
-        while !nes.clock() {}
+        let mut last_sample = 0.0;
+        let mut clocks = 0;
+        'cycles: loop {
+            let (frame_complete, sample) = nes.clock();
+            clocks += 1;
+            if let Some(sample) = sample {
+                let delta = ((sample - last_sample) * (i16::MAX as f32)) as i32;
+                last_sample = sample;
+                blip.add_delta(clocks, delta);
+            }
+            if frame_complete {
+                break 'cycles;
+            }
+        }
+        blip.end_frame(clocks);
+        while blip.samples_avail() != 0 {
+            blip.read_samples(&mut audio_buffer, false);
+        }
+
         let now = Instant::now();
 
-        window.update_with_buffer(&buffer.as_ref().borrow(), NES_WIDTH, NES_HEIGHT)?;
+        window.update_with_buffer(&screen_buffer.as_ref().borrow(), NES_WIDTH, NES_HEIGHT)?;
 
         if now < next_frame {
             thread::sleep(next_frame - now);

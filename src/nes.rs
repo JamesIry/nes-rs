@@ -82,7 +82,8 @@ impl NES {
         self.tick = 0;
     }
 
-    pub fn clock(&mut self) -> bool {
+    pub fn clock(&mut self) -> (bool, Option<f32>) {
+        let mut audio_sample = None;
         if self.tick == 0 {
             {
                 let input1 = self.controller1.borrow().read_value();
@@ -91,7 +92,8 @@ impl NES {
                 let mut apu_borrowed = self.apu.as_ref().borrow_mut();
                 apu_borrowed.set_input_port1(input1);
                 apu_borrowed.set_input_port2(input2);
-                let (irq, _) = apu_borrowed.clock();
+                let (irq, sample) = apu_borrowed.clock();
+                audio_sample = Some(sample);
                 if irq {
                     self.cpu.as_ref().borrow_mut().irq();
                 }
@@ -109,7 +111,7 @@ impl NES {
             self.tick = 0;
         }
 
-        end_of_frame
+        (end_of_frame, audio_sample)
     }
 
     pub fn load_cartridge(&mut self, cartridge_name: String) -> Result<()> {
