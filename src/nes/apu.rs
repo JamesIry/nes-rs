@@ -823,6 +823,7 @@ impl Sweep {
 
         if self.divider == 0 || self.start {
             self.divider = self.period;
+            self.start = false;
         } else {
             self.divider -= 1;
         }
