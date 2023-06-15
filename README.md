@@ -1,4 +1,4 @@
-Ultimataly targeted to being an NES emulator. Now very much a work in progress. Mapper0/NROM games like Super Mario Bros should be playable but won't have sound. Other mapper types are still TBD.
+Ultimataly targeted to being an NES emulator. Now very much a work in progress. Mapper0/NROM games like Super Mario Bros should be playable, though sound is incomplete as sampled sounds are being worked on. Other mapper types are still TBD.
 
 On my system, the only way to get acceptable performance is cargo run/build --release. Debug mode just won't cut it - PPU cycles take 10x as long under debug as they do under release.
 
@@ -23,8 +23,7 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [X] Play sounds
     - [X] Triangle channel
     - [X] Noise channel  
-    - [ ] DMC DMA (in progress)
-    - [ ] DMC channel
+    - [ ] DMC channel (in progress)
 - [ ] Detailed Timing
     - [ ] Cycle correct 6502
     - [ ] Fix NMI timing

@@ -87,6 +87,7 @@ impl APU {
         match self.resetting_state {
             ResettingState::Ready => {
                 let read_cycle = self.read_cycle;
+                self.dmc_channel.manage_dma(read_cycle, &mut self.cpu);
                 let outputs = self.channel_set().map(|c| c.clock(read_cycle) as f32);
                 let pulse_out = if outputs[0] == 0.0 && outputs[1] == 0.0 {
                     0.0
