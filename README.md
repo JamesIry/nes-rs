@@ -18,12 +18,13 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [X] Sprite rendering
 - [ ] APU
     - [X] Sprite DMA
-    - [ ] Pulse Channels (in progress)
-    - [ ] Triangle Channel
-    - [ ] Noise Channel
-    - [ ] DMC DMA 
-    - [ ] DMC Channel
-    - [ ] Sound
+    - [X] Pulse channels
+    - [X] Mixer
+    - [X] Play sounds
+    - [X] Triangle channel
+    - [X] Noise channel  
+    - [ ] DMC DMA (in progress)
+    - [ ] DMC channel
 - [ ] Detailed Timing
     - [ ] Cycle correct 6502
     - [ ] Fix NMI timing

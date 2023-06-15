@@ -141,17 +141,8 @@ impl LengthCounter {
     }
 
     fn half_frame_clock(&mut self) {
-        const PERIOD_LOOKUP: [u8; 32] = [
-            10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20,
-            96, 22, 192, 24, 72, 26, 16, 28, 32, 30,
-        ];
-
-        if !self.halted {
-            if self.value == 0 {
-                self.value = PERIOD_LOOKUP[self.period_index as usize];
-            } else {
-                self.value -= 1;
-            }
+        if !self.halted && self.value != 0 {
+            self.value -= 1;
         }
     }
 
@@ -159,15 +150,18 @@ impl LengthCounter {
         self.value != 0
     }
 
-    fn load_halted_bits(&mut self, value: u8) {
-        self.halted = value & 0b00100000 != 0;
+    fn load_bits(&mut self, value: u8, enabled: bool) {
+        if enabled {
+            const PERIOD_LOOKUP: [u8; 32] = [
+                10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48,
+                20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30,
+            ];
+            self.period_index = (value & 0b11111000) >> 3;
+            self.value = PERIOD_LOOKUP[self.period_index as usize];
+        }
     }
 
-    fn load_period_index_bits(&mut self, value: u8) {
-        self.period_index = (value & 0b11111000) >> 3
-    }
-
-    fn read_period_index_bits(&self) -> u8 {
+    fn read_bits(&self) -> u8 {
         (self.period_index << 3) & 0b11111000
     }
 }

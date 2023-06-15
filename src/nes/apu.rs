@@ -17,6 +17,8 @@ const RANGE_END: u16 = 0x401F;
 const ADDR_MASK: u16 = 0x401F;
 
 pub struct APU {
+    resetting_state: ResettingState,
+
     cpu: Rc<RefCell<CPU>>,
     read_cycle: bool,
     last_read: u8,
@@ -45,6 +47,7 @@ pub struct APU {
 impl APU {
     pub fn new(cpu: Rc<RefCell<CPU>>) -> Self {
         Self {
+            resetting_state: ResettingState::WaitingForEnable,
             cpu,
             read_cycle: true,
             last_read: 0xFF,
@@ -80,30 +83,45 @@ impl APU {
         self.manage_oam_dma();
         self.manage_frame_counter();
 
-        let read_cycle = self.read_cycle;
-        let outputs = self.channel_set().map(|c| c.clock(read_cycle) as f32);
-        let pulse_out = if outputs[0] == 0.0 && outputs[1] == 0.0 {
-            0.0
-        } else {
-            95.88 / ((8128.0 / (outputs[0] + outputs[1])) + 100.0)
-        };
+        let mut result = (false, 0.0);
+        match self.resetting_state {
+            ResettingState::Ready => {
+                let read_cycle = self.read_cycle;
+                let outputs = self.channel_set().map(|c| c.clock(read_cycle) as f32);
+                let pulse_out = if outputs[0] == 0.0 && outputs[1] == 0.0 {
+                    0.0
+                } else {
+                    95.88 / ((8128.0 / (outputs[0] + outputs[1])) + 100.0)
+                };
 
-        let tnd_out = if outputs[2] == 0.0 && outputs[3] == 0.0 && outputs[4] == 0.0 {
-            0.0
-        } else {
-            159.79
-                / (1.0 / (outputs[2] / 8227.0 + outputs[3] / 12241.0 + outputs[4] / 22638.0)
-                    + 100.0)
-        };
+                let tnd_out = if outputs[2] == 0.0 && outputs[3] == 0.0 && outputs[4] == 0.0 {
+                    0.0
+                } else {
+                    159.79
+                        / (1.0
+                            / (outputs[2] / 8227.0 + outputs[3] / 12241.0 + outputs[4] / 22638.0)
+                            + 100.0)
+                };
 
-        (
-            self.sound_enable_register_high
-                .contains(SoundEnableFlags::FrameInterrupt),
-            pulse_out + tnd_out,
-        )
+                result = (
+                    self.sound_enable_register_high
+                        .contains(SoundEnableFlags::FrameInterrupt),
+                    pulse_out + tnd_out,
+                );
+            }
+            ResettingState::CountingDown(0) => {
+                self.resetting_state = ResettingState::Ready;
+            }
+            ResettingState::CountingDown(n) => {
+                self.resetting_state = ResettingState::CountingDown(n - 1);
+            }
+            ResettingState::WaitingForEnable => (),
+        }
+        result
     }
 
     pub fn reset(&mut self) {
+        self.resetting_state = ResettingState::WaitingForEnable;
         self.read_cycle = true;
         self.oam_dma_state = OamDmaState::NoDma;
         self.oam_dma_data = 0;
@@ -348,7 +366,7 @@ impl BusDevice for APU {
             let physical = addr & ADDR_MASK;
             let old = match physical {
                 0x4000..=0x4013 => {
-                    let channel_number = (physical >> 2) & 0xF;
+                    let channel_number = (physical >> 2) & 0b00000111;
                     let channel = &mut self.channel_set()[channel_number as usize];
                     let reg = (physical & 0b00000011) as u8;
                     let old = channel.read_register(reg);
@@ -365,6 +383,17 @@ impl BusDevice for APU {
                     let status = SoundEnableFlags::from_bits_truncate(data);
                     for channel in self.channel_set() {
                         channel.set_enabled(status.contains(channel.get_enabled_flag()));
+                    }
+                    if self.resetting_state == ResettingState::WaitingForEnable
+                        && status.intersects(
+                            SoundEnableFlags::Pulse1
+                                | SoundEnableFlags::Pulse2
+                                | SoundEnableFlags::Triangle
+                                | SoundEnableFlags::Noise
+                                | SoundEnableFlags::DMC,
+                        )
+                    {
+                        self.resetting_state = ResettingState::CountingDown(2048);
                     }
                     self.sound_enable_register_high
                         .set(SoundEnableFlags::DMCInterrupt, false);
@@ -431,4 +460,11 @@ enum FrameCounterResetState {
     None,
     WaitingForRead,
     WaitingForWrite,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ResettingState {
+    WaitingForEnable,
+    CountingDown(u16),
+    Ready,
 }

@@ -5,7 +5,7 @@ use cpal::{
     Device, FromSample, Sample, SizedSample, StreamConfig,
 };
 use crossbeam_channel::bounded;
-use minifb::{Key, Scale, ScaleMode, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, Scale, ScaleMode, Window, WindowOptions};
 use nes::{controllers::JoyPad, NES};
 use std::collections::HashSet;
 use std::{cell::RefCell, env, rc::Rc, time::Instant};
@@ -59,8 +59,9 @@ fn run<T>(audio_device: &Device, stream_config: &StreamConfig) -> Result<()>
 where
     T: FromSample<i16> + SizedSample,
 {
-    // be sure  there's enough space in the shared queue for 1 frame's worth of samples
-    let buff_size = (stream_config.sample_rate.0 / 60 + 1) as usize;
+    let mut muted = false;
+    // be sure  there's enough space in the shared queue for 2 frame's worth of samples
+    let buff_size = (stream_config.sample_rate.0 / 60 * 2 + 1) as usize;
     let (sender, receiver) = bounded::<i16>(buff_size);
     let mut next_value = move || receiver.recv().unwrap_or(0);
 
@@ -121,17 +122,22 @@ where
     let mut clocks = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let (frame_complete, sample_opt) = nes.clock();
-        clocks += 1;
         if let Some(sample_float) = sample_opt {
-            // we get samples from 0.0 to 1.0, convert to ranging from -1.0 to 1.0 with a clamp
-            // to make doubly sure
-            let sample_normed = (sample_float * 2.0 - 1.0).clamp(-1.0, 1.0);
-            // now convert that to -i16::MAX to +i16::MAX
-            let sample = (sample_normed * (i16::MAX as f32)) as i32;
+            let sample = if muted {
+                0
+            } else {
+                // we get samples from 0.0 to 1.0, convert to ranging from -1.0 to 1.0 with a clamp
+                // to make doubly sure
+                let sample_normed = (sample_float * 2.0 - 1.0).clamp(-1.0, 1.0);
+                // now convert that to -i16::MAX to +i16::MAX
+                (sample_normed * (i16::MAX as f32)) as i32
+            };
+
             let delta = sample - last_sample;
             last_sample = sample;
             blip.add_delta(clocks, delta);
         }
+        clocks += 1;
         if frame_complete {
             window
                 .update_with_buffer(&screen_buffer.as_ref().borrow(), NES_WIDTH, NES_HEIGHT)
@@ -167,6 +173,10 @@ where
                 | check_keycode(&keys, Key::Backslash, JoyPadButton::Select);
 
             joypad1.as_ref().borrow_mut().set_buttons(input);
+
+            if window.is_key_pressed(Key::M, KeyRepeat::No) {
+                muted = !muted;
+            }
         }
     }
 

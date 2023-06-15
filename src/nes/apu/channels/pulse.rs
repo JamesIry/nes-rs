@@ -31,8 +31,8 @@ impl Channel for PulseChannel {
         match n {
             0 => {
                 self.sequencer.load_bits(value);
-                self.length_counter.load_halted_bits(value);
                 self.envelope.load_bits(value);
+                self.length_counter.halted = self.envelope.loop_enable;
             }
             1 => {
                 self.sweep.load_bits(value);
@@ -42,7 +42,7 @@ impl Channel for PulseChannel {
             }
             3 => {
                 self.frequency_timer.load_high_bits(value);
-                self.length_counter.load_period_index_bits(value);
+                self.length_counter.load_bits(value, self.enabled);
                 self.envelope.start = true;
                 self.sequencer.start = true;
             }
@@ -56,9 +56,7 @@ impl Channel for PulseChannel {
             0 => self.sequencer.read_bits() | self.envelope.read_bits(),
             1 => self.sweep.read_bits(),
             2 => self.frequency_timer.read_low_bits(),
-            3 => {
-                self.frequency_timer.read_high_bits() | self.length_counter.read_period_index_bits()
-            }
+            3 => self.frequency_timer.read_high_bits() | self.length_counter.read_bits(),
             _ => unreachable!("Invalid register {}", n),
         }
     }
@@ -87,7 +85,8 @@ impl Channel for PulseChannel {
             self.sequencer.advance_position();
         }
 
-        if self.sweep.gate() && self.sequencer.gate() && self.length_counter.gate() {
+        if self.enabled && self.sweep.gate() && self.sequencer.gate() && self.length_counter.gate()
+        {
             self.envelope.output
         } else {
             0
