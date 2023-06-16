@@ -31,23 +31,26 @@ impl RAM {
 }
 
 impl BusDevice for RAM {
-    fn read(&mut self, addr: u16) -> Option<u8> {
+    fn get_address_range(&self) -> (u16, u16) {
+        (self.start_addr, self.end_addr)
+    }
+
+    fn read(&mut self, addr: u16) -> u8 {
         if addr >= self.start_addr && addr <= self.end_addr {
-            let data = self.memory[self.physical(addr)];
-            Some(data)
+            self.memory[self.physical(addr)]
         } else {
-            None
+            panic!("Address out of range in RAM {}", addr)
         }
     }
 
-    fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
+    fn write(&mut self, addr: u16, data: u8) -> u8 {
         if addr >= self.start_addr && addr <= self.end_addr {
             let physical = self.physical(addr);
             let old = self.memory[physical];
             self.memory[physical] = data;
-            Some(old)
+            old
         } else {
-            None
+            panic!("Address out of range in RAM {}", addr)
         }
     }
 }

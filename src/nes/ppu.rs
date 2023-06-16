@@ -655,9 +655,13 @@ impl PPU {
 }
 
 impl BusDevice for PPU {
-    fn read(&mut self, addr: u16) -> Option<u8> {
+    fn get_address_range(&self) -> (u16, u16) {
+        (CPU_ADDR_START, CPU_ADDR_END)
+    }
+
+    fn read(&mut self, addr: u16) -> u8 {
         if (CPU_ADDR_START..=CPU_ADDR_END).contains(&addr) {
-            Some(match addr & CPU_ADDR_MASK {
+            match addr & CPU_ADDR_MASK {
                 0x2000 => self.data_buffer,
                 0x2001 => self.data_buffer,
                 0x2002 => {
@@ -684,15 +688,15 @@ impl BusDevice for PPU {
                     result
                 }
                 physical => unreachable!("reading from ppu register {}", physical),
-            })
+            }
         } else {
-            None
+            panic!("Address out of range in PPU {}", addr)
         }
     }
 
-    fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
+    fn write(&mut self, addr: u16, data: u8) -> u8 {
         if (CPU_ADDR_START..=CPU_ADDR_END).contains(&addr) {
-            Some(match addr & CPU_ADDR_MASK {
+            match addr & CPU_ADDR_MASK {
                 0x2000 => {
                     let old = self.get_ctrl_flags();
 
@@ -757,9 +761,9 @@ impl BusDevice for PPU {
                     result
                 }
                 physical => unreachable!("writing to ppu register {}", physical),
-            })
+            }
         } else {
-            None
+            panic!("Address out of range in PPU {}", addr)
         }
     }
 }

@@ -53,7 +53,7 @@ fn test_status_regiter() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(
-        Some((StatusFlags::VerticalBlank | StatusFlags::SpriteOverflow).bits()),
+        (StatusFlags::VerticalBlank | StatusFlags::SpriteOverflow).bits(),
         ppu.read(0x2002)
     );
 
@@ -62,12 +62,12 @@ fn test_status_regiter() {
     ppu.set_status_flag(StatusFlags::Sprite0Hit, true);
 
     assert_eq!(
-        Some((StatusFlags::VerticalBlank | StatusFlags::Sprite0Hit).bits()),
+        (StatusFlags::VerticalBlank | StatusFlags::Sprite0Hit).bits(),
         ppu.read(0x2002)
     );
 
     // first ready should have cleared the vertical blank flag
-    assert_eq!(Some(StatusFlags::Sprite0Hit.bits()), ppu.read(0x2002));
+    assert_eq!(StatusFlags::Sprite0Hit.bits(), ppu.read(0x2002));
 
     assert_eq!(0, ppu.vram_address.register);
 }
@@ -79,11 +79,11 @@ fn test_read_from_write() {
 
     ppu.data_buffer = 0x42;
 
-    assert_eq!(Some(0x42), ppu.read(0x2000));
-    assert_eq!(Some(0x42), ppu.read(0x2001));
-    assert_eq!(Some(0x42), ppu.read(0x2003));
-    assert_eq!(Some(0x42), ppu.read(0x2005));
-    assert_eq!(Some(0x42), ppu.read(0x2006));
+    assert_eq!(0x42, ppu.read(0x2000));
+    assert_eq!(0x42, ppu.read(0x2001));
+    assert_eq!(0x42, ppu.read(0x2003));
+    assert_eq!(0x42, ppu.read(0x2005));
+    assert_eq!(0x42, ppu.read(0x2006));
 }
 
 #[test]
@@ -102,10 +102,10 @@ fn test_oam_registers() {
     assert_eq!(0x00, ppu.primary_oam.table[0x44]);
 
     ppu.write(0x2003, 0x42);
-    assert_eq!(Some(0x12), ppu.read(0x2004));
-    assert_eq!(Some(0x12), ppu.read(0x2004));
+    assert_eq!(0x12, ppu.read(0x2004));
+    assert_eq!(0x12, ppu.read(0x2004));
     ppu.write(0x2003, 0x43);
-    assert_eq!(Some(0x34), ppu.read(0x2004));
+    assert_eq!(0x34, ppu.read(0x2004));
 
     assert_eq!(0, ppu.vram_address.register);
 }
@@ -172,9 +172,9 @@ fn test_data_registers_small_stride() {
 
     // but once clock has ticked the reads will be good
     assert_eq!((false, true), ppu.clock());
-    assert_eq!(Some(0x42), ppu.read(0x2007));
+    assert_eq!(0x42, ppu.read(0x2007));
     assert_eq!((false, true), ppu.clock());
-    assert_eq!(Some(0x43), ppu.read(0x2007));
+    assert_eq!(0x43, ppu.read(0x2007));
 }
 
 #[test]
@@ -204,9 +204,9 @@ fn test_data_registers_large_stride() {
 
     // but once clock has ticked the reads will be good
     assert_eq!((false, true), ppu.clock());
-    assert_eq!(Some(0x42), ppu.read(0x2007));
+    assert_eq!(0x42, ppu.read(0x2007));
     assert_eq!((false, true), ppu.clock());
-    assert_eq!(Some(0x43), ppu.read(0x2007));
+    assert_eq!(0x43, ppu.read(0x2007));
 }
 
 #[test]
@@ -234,8 +234,8 @@ fn test_automatic_status() {
     assert_eq!(0, ppu.status_register.bits());
     assert_eq!((false, false), ppu.clock()); // nmi transition should happen here
     assert!(ppu.read_status_flag(StatusFlags::VerticalBlank));
-    assert_eq!(Some(StatusFlags::VerticalBlank.bits()), ppu.read(0x2002)); // should clear VB flag
-    assert_eq!(Some(0), ppu.read(0x2002));
+    assert_eq!(StatusFlags::VerticalBlank.bits(), ppu.read(0x2002)); // should clear VB flag
+    assert_eq!(0, ppu.read(0x2002));
 
     ppu.set_ctrl_flag(CtrlFlags::NmiEnabled, false);
     ppu.status_register = StatusFlags::empty();

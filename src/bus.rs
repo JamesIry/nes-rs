@@ -1,12 +1,14 @@
 use std::{cell::RefCell, rc::Rc};
 
 pub trait BusDevice {
-    fn read(&mut self, addr: u16) -> Option<u8>;
-    fn write(&mut self, addr: u16, data: u8) -> Option<u8>;
+    fn get_address_range(&self) -> (u16, u16);
+    fn read(&mut self, addr: u16) -> u8;
+    fn write(&mut self, addr: u16, data: u8) -> u8;
 }
 
+type AddrRange = (u16, u16);
 pub struct Bus {
-    bus_devices: Vec<Rc<RefCell<dyn BusDevice>>>,
+    bus_devices: Vec<(AddrRange, Rc<RefCell<dyn BusDevice>>)>,
 }
 
 impl Bus {
@@ -17,13 +19,14 @@ impl Bus {
     }
 
     pub fn add_device(&mut self, device: Rc<RefCell<dyn BusDevice>>) {
-        self.bus_devices.push(device);
+        let addr_range = device.as_ref().borrow_mut().get_address_range();
+        self.bus_devices.push((addr_range, device));
     }
 
     pub fn read(&self, addr: u16) -> u8 {
         for device in &self.bus_devices {
-            if let Some(data) = device.borrow_mut().read(addr) {
-                return data;
+            if device.0 .0 <= addr && addr <= device.0 .1 {
+                return device.1.borrow_mut().read(addr);
             }
         }
         0
@@ -31,8 +34,8 @@ impl Bus {
 
     pub fn write(&self, addr: u16, data: u8) -> u8 {
         for device in &self.bus_devices {
-            if let Some(data) = device.borrow_mut().write(addr, data) {
-                return data;
+            if device.0 .0 <= addr && addr <= device.0 .1 {
+                return device.1.borrow_mut().write(addr, data);
             }
         }
         0

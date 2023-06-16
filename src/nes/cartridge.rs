@@ -157,68 +157,76 @@ impl Cartridge {
         }
     }
 
-    pub fn read_cpu(&mut self, addr: u16) -> Option<u8> {
+    pub fn read_cpu(&mut self, addr: u16) -> u8 {
         let location = self.translate_cpu_addr(addr);
         match location {
-            mappers::CartridgeCpuLocation::None => None,
+            mappers::CartridgeCpuLocation::None => {
+                panic!("CPU address out of range in cart {}", addr)
+            }
             mappers::CartridgeCpuLocation::SRam(addr) => {
-                Some(self.sram[(addr & self.sram_addr_mask) as usize])
+                self.sram[(addr & self.sram_addr_mask) as usize]
             }
             mappers::CartridgeCpuLocation::Trainer(addr) => {
-                Some(self.trainer_ram[(addr & 0x01FF) as usize])
+                self.trainer_ram[(addr & 0x01FF) as usize]
             }
             mappers::CartridgeCpuLocation::PrgRom(addr) => {
-                Some(self.prg_rom[(addr & self.prg_rom_mask) as usize])
+                self.prg_rom[(addr & self.prg_rom_mask) as usize]
             }
         }
     }
 
-    pub fn write_cpu(&mut self, addr: u16, data: u8) -> Option<u8> {
+    pub fn write_cpu(&mut self, addr: u16, data: u8) -> u8 {
         let location = self.translate_cpu_addr(addr);
         match location {
-            mappers::CartridgeCpuLocation::None => None,
+            mappers::CartridgeCpuLocation::None => {
+                panic!("CPU address out of range in cart {}", addr)
+            }
             mappers::CartridgeCpuLocation::SRam(addr) => {
                 let old = self.sram[(addr & self.sram_addr_mask) as usize];
                 self.sram[(addr & self.sram_addr_mask) as usize] = data;
-                Some(old)
+                old
             }
             mappers::CartridgeCpuLocation::Trainer(addr) => {
                 let old = self.trainer_ram[(addr & 0x01FF) as usize];
                 self.trainer_ram[(addr & 0x01FF) as usize] = data;
-                Some(old)
+                old
             }
-            mappers::CartridgeCpuLocation::PrgRom(_) => None,
+            mappers::CartridgeCpuLocation::PrgRom(_) => 0,
         }
     }
 
-    pub fn read_ppu(&mut self, addr: u16) -> Option<u8> {
+    pub fn read_ppu(&mut self, addr: u16) -> u8 {
         let location = self.mapper.translate_ppu_addr(addr);
         match location {
             mappers::CartridgePpuLocation::ChrRom(addr) => {
                 let physical = (addr & self.chr_rom_mask) as usize;
-                Some(self.chr_rom[physical])
+                self.chr_rom[physical]
             }
-            mappers::CartridgePpuLocation::VRam(addr) => Some(self.vram[addr as usize]),
-            mappers::CartridgePpuLocation::None => None,
+            mappers::CartridgePpuLocation::VRam(addr) => self.vram[addr as usize],
+            mappers::CartridgePpuLocation::None => {
+                panic!("PPU address out of range in cart {}", addr)
+            }
         }
     }
 
-    pub fn write_ppu(&mut self, addr: u16, data: u8) -> Option<u8> {
+    pub fn write_ppu(&mut self, addr: u16, data: u8) -> u8 {
         let location = self.mapper.translate_ppu_addr(addr);
         match location {
             mappers::CartridgePpuLocation::ChrRom(addr) => {
                 let physical = (addr & self.chr_rom_mask) as usize;
                 let old = self.chr_rom[physical];
                 self.chr_rom[physical] = data;
-                Some(old)
+                old
             }
             mappers::CartridgePpuLocation::VRam(addr) => {
                 let physical = addr as usize;
                 let old = self.vram[physical];
                 self.vram[physical] = data;
-                Some(old)
+                old
             }
-            mappers::CartridgePpuLocation::None => None,
+            mappers::CartridgePpuLocation::None => {
+                panic!("PPU address out of range in cart {}", addr)
+            }
         }
     }
 }
@@ -234,12 +242,16 @@ impl CartridgeCPUPort {
 }
 
 impl BusDevice for CartridgeCPUPort {
-    fn read(&mut self, addr: u16) -> Option<u8> {
+    fn read(&mut self, addr: u16) -> u8 {
         self.cartridge.borrow_mut().read_cpu(addr)
     }
 
-    fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
+    fn write(&mut self, addr: u16, data: u8) -> u8 {
         self.cartridge.borrow_mut().write_cpu(addr, data)
+    }
+
+    fn get_address_range(&self) -> (u16, u16) {
+        (0x4020, 0xFFFF)
     }
 }
 
@@ -254,12 +266,16 @@ impl CartridgePPUPort {
 }
 
 impl BusDevice for CartridgePPUPort {
-    fn read(&mut self, addr: u16) -> Option<u8> {
+    fn read(&mut self, addr: u16) -> u8 {
         self.cartridge.borrow_mut().read_ppu(addr)
     }
 
-    fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
+    fn write(&mut self, addr: u16, data: u8) -> u8 {
         self.cartridge.borrow_mut().write_ppu(addr, data)
+    }
+
+    fn get_address_range(&self) -> (u16, u16) {
+        (0x0000, 0x3EFF)
     }
 }
 

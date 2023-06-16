@@ -328,7 +328,11 @@ impl APU {
 
 #[allow(clippy::manual_range_contains)]
 impl BusDevice for APU {
-    fn read(&mut self, addr: u16) -> Option<u8> {
+    fn get_address_range(&self) -> (u16, u16) {
+        (RANGE_START, RANGE_END)
+    }
+
+    fn read(&mut self, addr: u16) -> u8 {
         if addr >= RANGE_START && addr <= RANGE_END {
             let physical = addr & ADDR_MASK;
             let result = match physical {
@@ -362,13 +366,13 @@ impl BusDevice for APU {
                 }
                 _ => 0xFF,
             };
-            Some(result)
+            result
         } else {
-            None
+            panic!("Address out of range in APU {}", addr)
         }
     }
 
-    fn write(&mut self, addr: u16, data: u8) -> Option<u8> {
+    fn write(&mut self, addr: u16, data: u8) -> u8 {
         if addr >= RANGE_START && addr <= RANGE_END {
             let physical = addr & ADDR_MASK;
             let old = match physical {
@@ -425,9 +429,9 @@ impl BusDevice for APU {
                 }
                 _ => 0xFF,
             };
-            Some(old)
+            old
         } else {
-            None
+            panic!("Address out of range in APU {}", addr)
         }
     }
 }
