@@ -1,4 +1,4 @@
-use crate::nes::apu::SoundEnableFlags;
+use crate::nes::apu::{APUCycleType, SoundEnableFlags};
 
 use super::{Channel, FrequencyTimer, LengthCounter};
 
@@ -69,8 +69,8 @@ impl Channel for TriangleChannel {
     fn get_enabled_flag(&self) -> SoundEnableFlags {
         SoundEnableFlags::Triangle
     }
-    fn clock(&mut self, read_cycle: bool) -> u8 {
-        if self.frequency_timer.clock(read_cycle)
+    fn clock(&mut self, apu_cycle_type: APUCycleType) -> u8 {
+        if self.frequency_timer.clock(apu_cycle_type)
             && self.linear_counter.gate()
             && self.length_counter.gate()
         {

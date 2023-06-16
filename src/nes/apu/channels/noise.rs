@@ -1,4 +1,4 @@
-use crate::nes::apu::SoundEnableFlags;
+use crate::nes::apu::{APUCycleType, SoundEnableFlags};
 
 use super::{Channel, Envelope, FrequencyTimer, LengthCounter};
 
@@ -74,8 +74,8 @@ impl Channel for NoiseChannel {
         SoundEnableFlags::Noise
     }
 
-    fn clock(&mut self, read_cycle: bool) -> u8 {
-        if self.frequency_timer.clock(read_cycle) {
+    fn clock(&mut self, apu_cycle_type: APUCycleType) -> u8 {
+        if self.frequency_timer.clock(apu_cycle_type) {
             self.sequencer.advance_position();
         }
 

@@ -148,12 +148,12 @@ impl CPU {
         }
     }
 
-    pub fn clock(&mut self) {
+    pub fn clock(&mut self) -> CPUCycleType {
         if self.jammed || !self.rdy {
-            return;
+            return CPUCycleType::Read;
         }
 
-        if self.remaining_cycles > 0 {
+        let cycle_type = if self.remaining_cycles > 0 {
             if self.remaining_cycles == 1 {
                 let (page_boundary, branch_taken) = self.execute(self.instruction, self.mode);
                 if page_boundary == PageBoundary::Crossed && self.cycle_on_page_boundary {
@@ -165,8 +165,10 @@ impl CPU {
                 self.monitor.end_instruction().unwrap(); // TODO propogate error
             }
             self.remaining_cycles -= 1;
+            CPUCycleType::Write
         } else if self.extra_cycles > 0 {
             self.extra_cycles -= 1;
+            CPUCycleType::Read
         } else {
             let (instruction, mode, cycles, cycle_on_boundary) = match self.interrupt {
                 Some(interrupt) => {
@@ -202,8 +204,10 @@ impl CPU {
             self.remaining_cycles = cycles.wrapping_sub(1);
             self.extra_cycles = 0;
             self.cycle_on_page_boundary = cycle_on_boundary;
-        }
+            CPUCycleType::Read
+        };
         self.cycles += 1;
+        cycle_type
     }
 
     pub fn add_device(&mut self, device: Rc<RefCell<dyn BusDevice>>) {
@@ -1213,4 +1217,10 @@ pub fn create_test_configuration() -> (CPU, Rc<RefCell<crate::ram::RAM>>) {
     let mem = Rc::new(RefCell::new(RAM::new(0x0000, 0xFFFF, 0xFFFF)));
     cpu.add_device(mem.clone());
     (cpu, mem)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CPUCycleType {
+    Read,
+    Write,
 }

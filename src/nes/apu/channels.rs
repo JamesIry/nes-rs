@@ -1,4 +1,4 @@
-use super::SoundEnableFlags;
+use super::{APUCycleType, SoundEnableFlags};
 
 pub mod dmc;
 pub mod noise;
@@ -12,7 +12,7 @@ pub trait Channel {
     fn set_enabled(&mut self, value: bool);
     fn get_enabled(&self) -> bool;
     fn quarter_frame_clock(&mut self);
-    fn clock(&mut self, read_cycle: bool) -> u8;
+    fn clock(&mut self, apu_cycle_type: APUCycleType) -> u8;
     fn half_frame_clock(&mut self);
 }
 
@@ -94,9 +94,9 @@ impl FrequencyTimer {
         }
     }
 
-    fn clock(&mut self, read_cycle: bool) -> bool {
+    fn clock(&mut self, apu_cycle_type: APUCycleType) -> bool {
         let mut result = false;
-        if !self.every_other_clock || !read_cycle {
+        if !self.every_other_clock || apu_cycle_type == APUCycleType::Put {
             if self.value == 0 {
                 self.value = self.period;
                 result = true;

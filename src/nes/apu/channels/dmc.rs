@@ -1,13 +1,16 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{cpu::CPU, nes::apu::SoundEnableFlags};
+use crate::{
+    cpu::{CPUCycleType, CPU},
+    nes::apu::{APUCycleType, SoundEnableFlags},
+};
 
 use super::{Channel, FrequencyTimer};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct DMCChannel {
     period_index: u8,
-    memory_reader: MemoryReader,
+    pub memory_reader: MemoryReader,
     frequency_timer: FrequencyTimer,
     output_unit: OutputUnit,
 }
@@ -21,9 +24,19 @@ impl DMCChannel {
         }
     }
 
-    pub fn manage_dma(&mut self, read_cycle: bool, cpu: &mut Rc<RefCell<CPU>>) {
+    pub fn manage_dma(
+        &mut self,
+        cpu_cyle_type: CPUCycleType,
+        apu_cycle_type: APUCycleType,
+        cpu: &mut Rc<RefCell<CPU>>,
+    ) {
         if self.output_unit.sample_buffer.is_none() {
-            self.output_unit.sample_buffer = self.memory_reader.fetch_dma(read_cycle, cpu)
+            self.memory_reader.manage_dma(
+                cpu_cyle_type,
+                apu_cycle_type,
+                cpu,
+                &mut self.output_unit.sample_buffer,
+            )
         }
     }
 }
@@ -73,8 +86,8 @@ impl Channel for DMCChannel {
         SoundEnableFlags::DMC
     }
 
-    fn clock(&mut self, read_cycle: bool) -> u8 {
-        if self.frequency_timer.clock(read_cycle) {
+    fn clock(&mut self, apu_cycle_type: APUCycleType) -> u8 {
+        if self.frequency_timer.clock(apu_cycle_type) {
             self.output_unit.advance_position();
         }
         self.output_unit.output
@@ -134,15 +147,17 @@ impl OutputUnit {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-struct MemoryReader {
+pub struct MemoryReader {
     irq_enabled: bool,
-    irq_occurred: bool,
+    pub irq_occurred: bool,
     loop_enabled: bool,
     samples_remaining: u16,
     sample_address: u16,
     current_address: u16,
     sample_length: u16,
     start: bool,
+    dma_state: DmcDmaState,
+    sample_buffer: u8,
 }
 impl MemoryReader {
     fn new() -> Self {
@@ -155,37 +170,63 @@ impl MemoryReader {
             current_address: 0xC000,
             sample_length: 1,
             start: false,
+            dma_state: DmcDmaState::NoDma,
+            sample_buffer: 0,
         }
     }
 
-    fn fetch_dma(&mut self, read_cycle: bool, cpu: &mut Rc<RefCell<CPU>>) -> Option<u8> {
+    fn manage_dma(
+        &mut self,
+        cpu_cycle_type: CPUCycleType,
+        apu_cycle_type: APUCycleType,
+        cpu: &mut Rc<RefCell<CPU>>,
+        sample: &mut Option<u8>,
+    ) {
         if self.start {
             self.start = false;
             self.current_address = self.sample_address;
             self.samples_remaining = self.sample_length;
         }
 
-        let mut sample = None;
-        if self.samples_remaining != 0 && read_cycle {
-            // TODO, need some more stall states related to OAM DMA, aligning, etc
-            // TODO need to drop the CPU RDY
-            sample = Some(
-                cpu.as_ref()
-                    .borrow_mut()
-                    .read_bus_byte(self.current_address),
-            );
-            if self.current_address == 0xFFFF {
-                self.current_address = 0x8000
-            } else {
-                self.current_address += 1;
-            }
-            self.samples_remaining -= 1;
-            if self.samples_remaining == 0 {
-                self.start = self.loop_enabled;
-                self.irq_occurred = self.irq_enabled;
-            }
+        if self.samples_remaining != 0
+            && cpu_cycle_type == CPUCycleType::Read
+            && self.dma_state == DmcDmaState::NoDma
+        {
+            self.dma_state = DmcDmaState::Requested;
         }
-        sample
+
+        match (self.dma_state, cpu_cycle_type, apu_cycle_type) {
+            (DmcDmaState::NoDma, _, _) => (),
+            (DmcDmaState::Requested, CPUCycleType::Read, _) => {
+                cpu.as_ref().borrow_mut().set_rdy(false);
+                self.dma_state = DmcDmaState::Getting;
+            }
+            (DmcDmaState::Requested, CPUCycleType::Write, _) => (),
+            (DmcDmaState::Getting, _, APUCycleType::Get) => {
+                self.sample_buffer = cpu
+                    .as_ref()
+                    .borrow_mut()
+                    .read_bus_byte(self.current_address);
+                if self.current_address == 0xFFFF {
+                    self.current_address = 0x8000
+                } else {
+                    self.current_address += 1;
+                }
+                self.dma_state = DmcDmaState::Putting;
+            }
+            (DmcDmaState::Getting, _, APUCycleType::Put) => (),
+            (DmcDmaState::Putting, _, APUCycleType::Put) => {
+                *sample = Some(self.sample_buffer);
+                self.samples_remaining -= 1;
+                if self.samples_remaining == 0 {
+                    self.start = self.loop_enabled;
+                    self.irq_occurred = self.irq_enabled;
+                }
+                cpu.as_ref().borrow_mut().set_rdy(true);
+                self.dma_state = DmcDmaState::NoDma;
+            }
+            (DmcDmaState::Putting, _, APUCycleType::Get) => unreachable!("Extra DMC read"),
+        }
     }
 
     fn load_flag_bits(&mut self, value: u8) {
@@ -216,4 +257,12 @@ impl MemoryReader {
     fn read_sample_address_bits(&self) -> u8 {
         (self.sample_address >> 6) as u8
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DmcDmaState {
+    NoDma,
+    Requested,
+    Getting,
+    Putting,
 }

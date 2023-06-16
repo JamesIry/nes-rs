@@ -4,9 +4,12 @@ mod channels;
 
 extern crate bitflags;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, ops::Not, rc::Rc};
 
-use crate::{bus::BusDevice, cpu::CPU};
+use crate::{
+    bus::BusDevice,
+    cpu::{CPUCycleType, CPU},
+};
 
 use self::channels::{
     dmc::DMCChannel, noise::NoiseChannel, pulse::PulseChannel, triangle::TriangleChannel, Channel,
@@ -20,7 +23,7 @@ pub struct APU {
     resetting_state: ResettingState,
 
     cpu: Rc<RefCell<CPU>>,
-    read_cycle: bool,
+    pub cycle_type: APUCycleType,
     last_read: u8,
 
     frame_counter: u16,
@@ -49,7 +52,7 @@ impl APU {
         Self {
             resetting_state: ResettingState::WaitingForEnable,
             cpu,
-            read_cycle: true,
+            cycle_type: APUCycleType::Put,
             last_read: 0xFF,
 
             frame_counter: 15,
@@ -75,20 +78,25 @@ impl APU {
     }
 
     #[must_use]
-    pub fn clock(&mut self) -> (bool, f32) {
-        self.read_cycle = !self.read_cycle;
+    pub fn clock(&mut self, cpu_cycle_type: CPUCycleType) -> (bool, f32) {
+        self.cycle_type = !self.cycle_type;
 
         self.manage_input_ports();
 
-        self.manage_oam_dma();
+        self.manage_oam_dma(cpu_cycle_type);
         self.manage_frame_counter();
 
         let mut result = (false, 0.0);
         match self.resetting_state {
             ResettingState::Ready => {
-                let read_cycle = self.read_cycle;
-                self.dmc_channel.manage_dma(read_cycle, &mut self.cpu);
-                let outputs = self.channel_set().map(|c| c.clock(read_cycle) as f32);
+                let cycle_type = self.cycle_type;
+                self.dmc_channel
+                    .manage_dma(cpu_cycle_type, self.cycle_type, &mut self.cpu);
+                self.sound_enable_register_high.set(
+                    SoundEnableFlags::DMCInterrupt,
+                    self.dmc_channel.memory_reader.irq_occurred,
+                );
+                let outputs = self.channel_set().map(|c| c.clock(cycle_type) as f32);
                 let pulse_out = if outputs[0] == 0.0 && outputs[1] == 0.0 {
                     0.0
                 } else {
@@ -105,8 +113,9 @@ impl APU {
                 };
 
                 result = (
-                    self.sound_enable_register_high
-                        .contains(SoundEnableFlags::FrameInterrupt),
+                    self.sound_enable_register_high.intersects(
+                        SoundEnableFlags::FrameInterrupt | SoundEnableFlags::DMCInterrupt,
+                    ),
                     pulse_out + tnd_out,
                 );
             }
@@ -123,7 +132,6 @@ impl APU {
 
     pub fn reset(&mut self) {
         self.resetting_state = ResettingState::WaitingForEnable;
-        self.read_cycle = true;
         self.oam_dma_state = OamDmaState::NoDma;
         self.oam_dma_data = 0;
         self.input_port1 = 0;
@@ -146,6 +154,7 @@ impl APU {
         // not updated at reset
         // self.frame_counter = 0;
         // self.frame_counter_control;
+        // self.cycle_type
     }
 
     pub fn set_input_port1(&mut self, value: u8) {
@@ -156,21 +165,23 @@ impl APU {
         self.input_port2 = value;
     }
 
-    fn manage_oam_dma(&mut self) {
-        match (self.oam_dma_state, self.read_cycle) {
-            (OamDmaState::NoDma, _) => (),
-            (OamDmaState::Requested, true) => {
+    fn manage_oam_dma(&mut self, cpu_cycle_type: CPUCycleType) {
+        match (self.oam_dma_state, cpu_cycle_type, self.cycle_type) {
+            (OamDmaState::NoDma, _, _) => (),
+            (OamDmaState::Requested, CPUCycleType::Read, _) => {
                 self.cpu.as_ref().borrow_mut().set_rdy(false);
                 self.oam_dma_state = OamDmaState::Ready;
             }
-            (OamDmaState::Requested, false) => (),
-            (OamDmaState::Ready, false) => {
+            (OamDmaState::Requested, CPUCycleType::Write, _) => (),
+            (OamDmaState::Ready, _, APUCycleType::Get) => {
                 self.read_oam_dma(0);
                 self.oam_dma_state = OamDmaState::Executing(0);
             }
-            (OamDmaState::Ready, true) => unreachable!("Oam state ready on even frame"),
-            (OamDmaState::Executing(offset), true) => self.read_oam_dma(offset as u16),
-            (OamDmaState::Executing(offset), false) => {
+            (OamDmaState::Ready, _, APUCycleType::Put) => (),
+            (OamDmaState::Executing(offset), _, APUCycleType::Get) => {
+                self.read_oam_dma(offset as u16)
+            }
+            (OamDmaState::Executing(offset), _, APUCycleType::Put) => {
                 self.write_oam_dma();
                 if offset == 255 {
                     self.cpu.as_ref().borrow_mut().set_rdy(true);
@@ -183,13 +194,13 @@ impl APU {
     }
 
     fn manage_frame_counter(&mut self) {
-        match (self.frame_counter_reset_state, self.read_cycle) {
-            (FrameCounterResetState::WaitingForRead, true) => {
-                self.frame_counter_reset_state = FrameCounterResetState::WaitingForWrite;
+        match (self.frame_counter_reset_state, self.cycle_type) {
+            (FrameCounterResetState::WaitingForGetCycle, APUCycleType::Get) => {
+                self.frame_counter_reset_state = FrameCounterResetState::WaitingForPutCycle;
                 self.frame_counter += 1;
             }
 
-            (FrameCounterResetState::WaitingForWrite, false) => {
+            (FrameCounterResetState::WaitingForPutCycle, APUCycleType::Put) => {
                 self.frame_counter = 0;
                 if self
                     .frame_counter_control
@@ -254,18 +265,13 @@ impl APU {
     }
 
     fn set_frame_interrupt(&mut self, value: bool) {
-        if value {
-            if !self
-                .frame_counter_control
-                .contains(FrameCounterFlags::IRQInhibit)
-            {
-                self.sound_enable_register_high
-                    .insert(SoundEnableFlags::FrameInterrupt);
-            }
-        } else {
-            self.sound_enable_register_high
-                .remove(SoundEnableFlags::FrameInterrupt);
-        }
+        self.sound_enable_register_high.set(
+            SoundEnableFlags::FrameInterrupt,
+            value
+                && !self
+                    .frame_counter_control
+                    .contains(FrameCounterFlags::IRQInhibit),
+        );
     }
 
     fn clock_half_frame(&mut self) {
@@ -370,9 +376,9 @@ impl BusDevice for APU {
                     let channel_number = (physical >> 2) & 0b00000111;
                     let channel = &mut self.channel_set()[channel_number as usize];
                     let reg = (physical & 0b00000011) as u8;
-                    let old = channel.read_register(reg);
                     channel.set_register(reg, data);
-                    old
+                    // to make nestest happy, retur 0xFF
+                    0xFF
                 }
                 0x4014 => {
                     let old = self.oam_dma_page;
@@ -414,7 +420,7 @@ impl BusDevice for APU {
                     {
                         self.set_frame_interrupt(false);
                     }
-                    self.frame_counter_reset_state = FrameCounterResetState::WaitingForRead;
+                    self.frame_counter_reset_state = FrameCounterResetState::WaitingForGetCycle;
                     old
                 }
                 _ => 0xFF,
@@ -459,8 +465,8 @@ bitflags::bitflags! {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum FrameCounterResetState {
     None,
-    WaitingForRead,
-    WaitingForWrite,
+    WaitingForGetCycle,
+    WaitingForPutCycle,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -468,4 +474,20 @@ enum ResettingState {
     WaitingForEnable,
     CountingDown(u16),
     Ready,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum APUCycleType {
+    Get,
+    Put,
+}
+impl Not for APUCycleType {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        match self {
+            APUCycleType::Get => APUCycleType::Put,
+            APUCycleType::Put => APUCycleType::Get,
+        }
+    }
 }

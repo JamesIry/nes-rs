@@ -5,7 +5,7 @@ mod ppu;
 
 use std::{cell::RefCell, rc::Rc};
 
-use crate::cpu::{CPUType, CPU};
+use crate::cpu::{CPUCycleType, CPUType, CPU};
 use crate::ram::RAM;
 use anyhow::Result;
 use apu::APU;
@@ -27,6 +27,7 @@ pub struct NES {
     tick: u8,
     controller1: Rc<RefCell<dyn Controller>>,
     controller2: Rc<RefCell<dyn Controller>>,
+    last_cycle_type: CPUCycleType,
 }
 
 impl NES {
@@ -72,6 +73,7 @@ impl NES {
             tick: 0,
             controller1,
             controller2,
+            last_cycle_type: CPUCycleType::Read,
         }
     }
 
@@ -92,13 +94,13 @@ impl NES {
                 let mut apu_borrowed = self.apu.as_ref().borrow_mut();
                 apu_borrowed.set_input_port1(input1);
                 apu_borrowed.set_input_port2(input2);
-                let (irq, sample) = apu_borrowed.clock();
+                let (irq, sample) = apu_borrowed.clock(self.last_cycle_type);
                 audio_sample = Some(sample);
                 if irq {
                     self.cpu.as_ref().borrow_mut().irq();
                 }
             };
-            self.cpu.as_ref().borrow_mut().clock();
+            self.last_cycle_type = self.cpu.as_ref().borrow_mut().clock();
         }
 
         let (end_of_frame, nmi) = self.ppu.as_ref().borrow_mut().clock();
