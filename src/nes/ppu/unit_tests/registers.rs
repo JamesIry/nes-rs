@@ -158,10 +158,10 @@ fn test_data_registers_small_stride() {
     assert_eq!(0x1234, ppu.vram_address.register);
 
     ppu.write(0x2007, 0x42);
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(0x42, ppu.bus.read(0x1234));
     ppu.write(0x2007, 0x43);
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(0x43, ppu.bus.read(0x1235));
 
     ppu.write(0x2006, 0x12);
@@ -171,9 +171,9 @@ fn test_data_registers_small_stride() {
     ppu.read(0x2007);
 
     // but once clock has ticked the reads will be good
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(Some(0x42), ppu.read(0x2007));
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(Some(0x43), ppu.read(0x2007));
 }
 
@@ -190,10 +190,10 @@ fn test_data_registers_large_stride() {
     ppu.write(0x2006, 0x34);
 
     ppu.write(0x2007, 0x42);
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(0x42, ppu.bus.read(0x1234));
     ppu.write(0x2007, 0x43);
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(0x43, ppu.bus.read(0x1254));
 
     ppu.write(0x2006, 0x12);
@@ -203,9 +203,9 @@ fn test_data_registers_large_stride() {
     ppu.read(0x2007);
 
     // but once clock has ticked the reads will be good
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(Some(0x42), ppu.read(0x2007));
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(Some(0x43), ppu.read(0x2007));
 }
 
@@ -225,14 +225,14 @@ fn test_automatic_status() {
         StatusFlags::VerticalBlank | StatusFlags::SpriteOverflow | StatusFlags::Sprite0Hit,
         ppu.status_register
     );
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(0, ppu.status_register.bits());
 
     ppu.scan_line = 241;
     ppu.tick = 0;
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(0, ppu.status_register.bits());
-    assert_eq!((false, true), ppu.clock()); // nmi should happen here
+    assert_eq!((false, false), ppu.clock()); // nmi transition should happen here
     assert!(ppu.read_status_flag(StatusFlags::VerticalBlank));
     assert_eq!(Some(StatusFlags::VerticalBlank.bits()), ppu.read(0x2002)); // should clear VB flag
     assert_eq!(Some(0), ppu.read(0x2002));
@@ -241,8 +241,8 @@ fn test_automatic_status() {
     ppu.status_register = StatusFlags::empty();
     ppu.scan_line = 241;
     ppu.tick = 0;
-    assert_eq!((false, false), ppu.clock());
+    assert_eq!((false, true), ppu.clock());
     assert_eq!(0, ppu.status_register.bits());
-    assert_eq!((false, false), ppu.clock()); // nmi should not happen here because disabled
+    assert_eq!((false, true), ppu.clock()); // nmi transition should not happen here because disabled
     assert_eq!(StatusFlags::VerticalBlank, ppu.status_register);
 }

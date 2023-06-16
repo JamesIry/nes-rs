@@ -51,7 +51,6 @@ pub struct PPU {
     scan_line: i16,
     tick: u16,
 
-    nmi_requested: bool,
     even_frame: bool,
 
     write_toggle: bool,
@@ -88,7 +87,6 @@ impl PPU {
             palettes: INITIAL_PALETTE_VALUES,
             scan_line: -1,
             tick: 0,
-            nmi_requested: false,
             even_frame: true,
             vram_address: VramAddress::new(),
             temporary_vram_address: VramAddress::new(),
@@ -133,7 +131,6 @@ impl PPU {
         self.mask_register = MaskFlags::empty();
         self.scan_line = -1;
         self.tick = 0;
-        self.nmi_requested = false;
         self.even_frame = true;
         self.write_toggle = false;
         self.vram_address = VramAddress::new();
@@ -174,9 +171,6 @@ impl PPU {
             (241, 1) => {
                 self.set_status_flag(StatusFlags::VerticalBlank, true);
                 self.primary_oam.write_enabled = true;
-                if self.read_ctrl_flag(CtrlFlags::NmiEnabled) {
-                    self.nmi_requested = true;
-                }
             }
             _ => (),
         }
@@ -602,12 +596,8 @@ impl PPU {
 
     #[must_use]
     fn manage_nmi(&mut self) -> bool {
-        if self.nmi_requested {
-            self.nmi_requested = false;
-            self.read_ctrl_flag(CtrlFlags::NmiEnabled)
-        } else {
-            false
-        }
+        !(self.read_status_flag(StatusFlags::VerticalBlank)
+            && self.read_ctrl_flag(CtrlFlags::NmiEnabled))
     }
 
     fn get_ctrl_flags(&self) -> CtrlFlags {
@@ -708,12 +698,6 @@ impl BusDevice for PPU {
 
                     let flags = CtrlFlags::from_bits_retain(data);
 
-                    if self.read_status_flag(StatusFlags::VerticalBlank)
-                        && !old.contains(CtrlFlags::NmiEnabled)
-                        && flags.contains(CtrlFlags::NmiEnabled)
-                    {
-                        self.nmi_requested = true;
-                    }
                     self.set_ctrl_flags(flags);
 
                     old.bits()

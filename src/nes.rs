@@ -96,17 +96,14 @@ impl NES {
                 apu_borrowed.set_input_port2(input2);
                 let (irq, sample) = apu_borrowed.clock(self.last_cycle_type);
                 audio_sample = Some(sample);
-                if irq {
-                    self.cpu.as_ref().borrow_mut().irq();
-                }
+
+                self.cpu.as_ref().borrow_mut().irq(irq);
             };
             self.last_cycle_type = self.cpu.as_ref().borrow_mut().clock();
         }
 
         let (end_of_frame, nmi) = self.ppu.as_ref().borrow_mut().clock();
-        if nmi {
-            self.cpu.as_ref().borrow_mut().nmi();
-        }
+        self.cpu.as_ref().borrow_mut().nmi(nmi);
 
         self.tick += 1;
         if self.tick == 3 {

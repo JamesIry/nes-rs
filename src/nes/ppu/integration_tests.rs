@@ -56,9 +56,9 @@ fn test_dma() {
             cpu.as_ref().borrow_mut().clock();
             assert!(!(cpu.borrow().is_rdy()));
             assert_eq!(cycles, cpu.as_ref().borrow_mut().cycles());
-            assert_eq!((false, false), ppu.as_ref().borrow_mut().clock());
-            assert_eq!((false, false), ppu.as_ref().borrow_mut().clock());
-            assert_eq!((false, false), ppu.as_ref().borrow_mut().clock());
+            assert_eq!((false, true), ppu.as_ref().borrow_mut().clock());
+            assert_eq!((false, true), ppu.as_ref().borrow_mut().clock());
+            assert_eq!((false, true), ppu.as_ref().borrow_mut().clock());
         }
 
         let _ = apu.as_ref().borrow_mut().clock(CPUCycleType::Read);

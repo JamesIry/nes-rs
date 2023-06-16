@@ -177,6 +177,10 @@ where
             if window.is_key_pressed(Key::M, KeyRepeat::No) {
                 muted = !muted;
             }
+
+            if window.is_key_pressed(Key::R, KeyRepeat::No) {
+                nes.reset();
+            }
         }
     }
 

@@ -154,8 +154,11 @@ fn test_scroll_post_render() {
                 ppu.clock(),
                 (
                     ppu.scan_line == -1 && ppu.tick == 0,
-                    ppu.tick == 2 && ppu.scan_line == 241
-                )
+                    false
+                ),
+                "{}, {}",
+                ppu.tick,
+                ppu.scan_line
             );
         }
     }
