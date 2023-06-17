@@ -2,7 +2,7 @@ use crate::{
     bus::InterruptFlags,
     nes::cartridge::{
         mappers::{CartridgeCpuLocation, CartridgePpuLocation},
-        Mapper, MirrorType,
+        Mapper, MirrorType, NesHeader,
     },
 };
 
@@ -18,11 +18,11 @@ pub struct ColorDreams {
 }
 
 impl ColorDreams {
-    pub fn new(mirror_type: MirrorType) -> Self {
+    pub fn new(nes_header: &NesHeader) -> Self {
         Self {
             chr_rom_converter: AddressConverter::new(0x0000, 8, 8, None),
             prg_rom_converter: AddressConverter::new(0x8000, 32, 32, None),
-            mirror_type,
+            mirror_type: nes_header.mirror_type,
         }
     }
 }

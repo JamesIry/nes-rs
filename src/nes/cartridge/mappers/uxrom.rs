@@ -2,7 +2,7 @@ use crate::{
     bus::InterruptFlags,
     nes::cartridge::{
         mappers::{CartridgeCpuLocation, CartridgePpuLocation},
-        Mapper, MirrorType,
+        Mapper, MirrorType, NesHeader,
     },
 };
 
@@ -17,10 +17,10 @@ pub struct UxRom {
 }
 
 impl UxRom {
-    pub fn new(mirror_type: MirrorType, prg_rom_size: usize) -> Self {
+    pub fn new(nes_header: &NesHeader) -> Self {
         Self {
-            mirror_type,
-            prg_rom_converter: AddressConverter::new(0x8000, 16, 16, Some(prg_rom_size)),
+            mirror_type: nes_header.mirror_type,
+            prg_rom_converter: AddressConverter::new(0x8000, 16, 16, Some(nes_header.prg_rom_size)),
         }
     }
 }

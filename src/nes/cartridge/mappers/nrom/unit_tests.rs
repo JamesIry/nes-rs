@@ -1,13 +1,15 @@
 use crate::nes::cartridge::{
     mappers::{CartridgePpuLocation, Mapper},
-    MirrorType,
+    MirrorType, NesHeader,
 };
 
 use super::NRom;
 
 #[test]
 fn test_mapping() {
-    let mut m = NRom::new(MirrorType::Vertical);
+    let mut nes_header = NesHeader::nul_header();
+    nes_header.mirror_type = MirrorType::Vertical;
+    let mut m = NRom::new(&nes_header);
 
     assert_eq!(
         CartridgePpuLocation::VRam(0x0000),
@@ -45,7 +47,7 @@ fn test_mapping() {
     );
 
     assert_eq!(
-        CartridgePpuLocation::VRam(0x0E99),
+        CartridgePpuLocation::VRam(0x1E99),
         m.translate_ppu_addr(0x3E99)
     );
 }

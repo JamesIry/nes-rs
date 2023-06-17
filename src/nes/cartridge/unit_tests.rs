@@ -1,10 +1,12 @@
-use crate::nes::cartridge::{mappers::nrom::NRom, Cartridge, MirrorType};
+use crate::nes::cartridge::{mappers::nrom::NRom, Cartridge, MirrorType, NesHeader};
 
 #[test]
 fn test_vertical_mirroring() {
     let mut c = Cartridge::nul_cartridge();
-    let mapper = NRom::new(MirrorType::Vertical);
-    c.mapper = Box::new(mapper);
+    let mut nes_header = NesHeader::nul_header();
+    nes_header.mirror_type = MirrorType::Vertical;
+    let m = NRom::new(&nes_header);
+    c.mapper = Box::new(m);
 
     assert_eq!(0x0000, c.mirror_vram(0x2000));
 
@@ -26,8 +28,10 @@ fn test_vertical_mirroring() {
 #[test]
 fn test_horizontal_mirroring() {
     let mut c = Cartridge::nul_cartridge();
-    let mapper = NRom::new(MirrorType::Horizontal);
-    c.mapper = Box::new(mapper);
+    let mut nes_header = NesHeader::nul_header();
+    nes_header.mirror_type = MirrorType::Horizontal;
+    let m = NRom::new(&nes_header);
+    c.mapper = Box::new(m);
 
     assert_eq!(0x0000, c.mirror_vram(0x2000));
 

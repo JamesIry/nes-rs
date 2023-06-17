@@ -31,16 +31,11 @@ pub enum MirrorType {
 }
 
 pub struct Cartridge {
+    nes_header: NesHeader,
     sram: Vec<u8>,
-    sram_addr_mask: usize,
-    #[allow(dead_code)]
-    sram_is_persistent: bool,
-    trainer: bool,
     trainer_ram: Vec<u8>,
     prg_rom: Vec<u8>,
-    prg_rom_mask: usize,
     chr_rom: Vec<u8>,
-    chr_rom_mask: usize,
     mapper: Box<dyn Mapper>,
     vram: Vec<u8>,
 }
@@ -59,16 +54,12 @@ impl Cartridge {
     pub fn nul_cartridge() -> Self {
         Self {
             sram: Vec::new(),
-            sram_addr_mask: 0,
-            sram_is_persistent: false,
-            trainer: false,
             trainer_ram: Vec::new(),
             prg_rom: Vec::new(),
-            prg_rom_mask: 0,
             chr_rom: Vec::new(),
-            chr_rom_mask: 0,
             mapper: Box::new(NulMapper {}),
             vram: Vec::new(),
+            nes_header: NesHeader::nul_header(),
         }
     }
 
@@ -80,45 +71,9 @@ impl Cartridge {
 
         reader.read_exact(&mut header)?;
 
-        if header[0..4] != NES_TAG {
-            Err(CartridgeError::UnrecognizedFileFormat)?;
-        }
+        let nes_header = NesHeader::new(&header)?;
 
-        let ines_ver = (header[7] >> 2) & 0x03;
-        if ines_ver != 0 {
-            Err(CartridgeError::UnsupportedInesVersion)?;
-        }
-
-        let four_screen = header[6] & 0x08 != 0;
-        let trainer = header[6] & 0x04 != 0;
-        let sram_is_persistent = header[6] & 0x02 != 0;
-        let vertical_mirroring = header[6] & 0x01 != 0;
-
-        let screen_mirroring = match (four_screen, vertical_mirroring) {
-            (false, false) => MirrorType::Horizontal,
-            (false, true) => MirrorType::Vertical,
-            (true, false) => MirrorType::FourScreen,
-            (true, true) => MirrorType::SingleScreen(0),
-        };
-
-        let prg_rom_size = (header[4] as usize) * PRG_ROM_PAGE_SIZE;
-        let mut chr_rom_size = (header[5] as usize) * CHR_ROM_PAGE_SIZE;
-        let chr_ram = if chr_rom_size == 0 {
-            chr_rom_size = CHR_ROM_PAGE_SIZE;
-            true
-        } else {
-            false
-        };
-        let mut sram_size = (header[8] as usize) * SRAM_PAGE_SIZE;
-        if sram_size == 0 {
-            sram_size = SRAM_PAGE_SIZE;
-        }
-
-        let prg_rom_mask = prg_rom_size - 1;
-        let chr_rom_mask = chr_rom_size - 1;
-        let sram_addr_mask = sram_size - 1;
-
-        let trainer_ram = if trainer {
+        let trainer_ram = if nes_header.has_trainer {
             let mut trainer_ram = vec![0; 512];
             reader.read_exact(&mut trainer_ram)?;
             trainer_ram
@@ -126,45 +81,37 @@ impl Cartridge {
             Vec::new()
         };
 
-        let mut prg_rom = vec![0; prg_rom_size];
+        let mut prg_rom = vec![0; nes_header.prg_rom_size];
         reader.read_exact(&mut prg_rom)?;
 
-        let mut chr_rom = vec![0; chr_rom_size];
-        if !chr_ram {
+        let mut chr_rom = vec![0; nes_header.chr_rom_size];
+        if !nes_header.chr_is_ram {
             reader.read_exact(&mut chr_rom)?;
         }
 
-        let sram = vec![0; sram_size];
+        let sram = vec![0; nes_header.sram_size];
 
         let vram = vec![0; VRAM_SIZE];
 
-        let mapper_number = (header[7] & 0xF0) | (header[6] >> 4);
-        let mapper: Box<dyn Mapper> = match mapper_number {
-            0 => Box::new(NRom::new(screen_mirroring)),
-            2 => Box::new(UxRom::new(screen_mirroring, prg_rom_size)),
-            3 => Box::new(CNRom::new(screen_mirroring)),
-            7 => Box::new(AxRom::new()),
-            11 => Box::new(ColorDreams::new(screen_mirroring)),
-            94 => Box::new(HvcUN1Rom::new(screen_mirroring, prg_rom_size)),
-            180 => Box::new(UxRomInvert::new(screen_mirroring)),
-            _ => Err(CartridgeError::UnsupportedMapper(mapper_number))?,
+        let mapper: Box<dyn Mapper> = match nes_header.mapper_number {
+            0 => Box::new(NRom::new(&nes_header)),
+            2 => Box::new(UxRom::new(&nes_header)),
+            3 => Box::new(CNRom::new(&nes_header)),
+            7 => Box::new(AxRom::new(&nes_header)),
+            11 => Box::new(ColorDreams::new(&nes_header)),
+            94 => Box::new(HvcUN1Rom::new(&nes_header)),
+            180 => Box::new(UxRomInvert::new(&nes_header)),
+            _ => Err(CartridgeError::UnsupportedMapper(nes_header.mapper_number))?,
         };
 
-        println!("sram_size {:#06x} | sram mask {:#06x} | peristence {} | trainer {} | prg size {:#06x} | prg mask {:#06x} | chr size {:#06x} | chr mask {:#06x} | screen mirroring {:?} | mapper {}",
-        sram_size, sram_addr_mask, sram_is_persistent, trainer, prg_rom_size, prg_rom_mask, chr_rom_size, chr_rom_mask, screen_mirroring, mapper_number);
-
         Ok(Cartridge {
+            nes_header,
             sram,
-            sram_addr_mask,
-            sram_is_persistent,
-            trainer,
             trainer_ram,
             prg_rom,
-            prg_rom_mask,
             chr_rom,
-            chr_rom_mask,
-            mapper,
             vram,
+            mapper,
         })
     }
 
@@ -191,7 +138,7 @@ impl Cartridge {
     }
 
     fn translate_cpu_addr(&mut self, addr: usize) -> CartridgeCpuLocation {
-        if self.trainer && (0x7000..=0x71FF).contains(&addr) {
+        if self.nes_header.has_trainer && (0x7000..=0x71FF).contains(&addr) {
             CartridgeCpuLocation::Trainer(addr - 0x7000)
         } else {
             self.mapper.translate_cpu_addr(addr)
@@ -201,9 +148,13 @@ impl Cartridge {
     pub fn read_cpu(&mut self, addr: u16) -> u8 {
         let location = self.translate_cpu_addr(addr as usize);
         match location {
-            mappers::CartridgeCpuLocation::SRam(addr) => self.sram[addr & self.sram_addr_mask],
+            mappers::CartridgeCpuLocation::SRam(addr) => {
+                self.sram[addr & self.nes_header.sram_addr_mask]
+            }
             mappers::CartridgeCpuLocation::Trainer(addr) => self.trainer_ram[addr & 0x01FF],
-            mappers::CartridgeCpuLocation::PrgRom(addr) => self.prg_rom[addr & self.prg_rom_mask],
+            mappers::CartridgeCpuLocation::PrgRom(addr) => {
+                self.prg_rom[addr & self.nes_header.prg_rom_mask]
+            }
             mappers::CartridgeCpuLocation::None => {
                 panic!("CPU address out of range in cart {}", addr)
             }
@@ -214,8 +165,8 @@ impl Cartridge {
         let location = self.translate_cpu_addr(addr as usize);
         match location {
             mappers::CartridgeCpuLocation::SRam(addr) => {
-                let old = self.sram[addr & self.sram_addr_mask];
-                self.sram[addr & self.sram_addr_mask] = data;
+                let old = self.sram[addr & self.nes_header.sram_addr_mask];
+                self.sram[addr & self.nes_header.sram_addr_mask] = data;
                 old
             }
             mappers::CartridgeCpuLocation::Trainer(addr) => {
@@ -234,7 +185,7 @@ impl Cartridge {
         let location = self.mapper.translate_ppu_addr(addr as usize);
         match location {
             mappers::CartridgePpuLocation::ChrRom(addr) => {
-                let physical = addr & self.chr_rom_mask;
+                let physical = addr & self.nes_header.chr_rom_mask;
                 self.chr_rom[physical]
             }
             mappers::CartridgePpuLocation::VRam(addr) => {
@@ -251,7 +202,7 @@ impl Cartridge {
         let location = self.mapper.translate_ppu_addr(addr as usize);
         match location {
             mappers::CartridgePpuLocation::ChrRom(addr) => {
-                let physical = addr & self.chr_rom_mask;
+                let physical = addr & self.nes_header.chr_rom_mask;
                 let old = self.chr_rom[physical];
                 self.chr_rom[physical] = data;
                 old
@@ -334,4 +285,88 @@ pub enum CartridgeError {
     UnsupportedInesVersion,
     #[error("The file loaded requires  mapper {0} which isn't supported yet")]
     UnsupportedMapper(u8),
+}
+
+pub struct NesHeader {
+    _ines_ver: u8,
+    mirror_type: MirrorType,
+    #[allow(dead_code)]
+    sram_is_persistent: bool,
+    chr_is_ram: bool,
+    has_trainer: bool,
+    prg_rom_size: usize,
+    chr_rom_size: usize,
+    sram_size: usize,
+    mapper_number: u8,
+
+    prg_rom_mask: usize,
+    chr_rom_mask: usize,
+    sram_addr_mask: usize,
+}
+impl NesHeader {
+    fn nul_header() -> NesHeader {
+        const NUL_HEADER: [u8; 16] = [b'N', b'E', b'S', 0x1A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        Self::new(&NUL_HEADER).unwrap()
+    }
+
+    fn new(header: &[u8; 16]) -> Result<NesHeader> {
+        if header[0..4] != NES_TAG {
+            Err(CartridgeError::UnrecognizedFileFormat)?;
+        }
+
+        let _ines_ver = (header[7] >> 2) & 0x03;
+        if _ines_ver != 0 {
+            Err(CartridgeError::UnsupportedInesVersion)?;
+        }
+
+        let four_screen = header[6] & 0x08 != 0;
+        let has_trainer = header[6] & 0x04 != 0;
+        let sram_is_persistent = header[6] & 0x02 != 0;
+        let vertical_mirroring = header[6] & 0x01 != 0;
+
+        let mirror_type = match (four_screen, vertical_mirroring) {
+            (false, false) => MirrorType::Horizontal,
+            (false, true) => MirrorType::Vertical,
+            (true, false) => MirrorType::FourScreen,
+            (true, true) => MirrorType::SingleScreen(0),
+        };
+
+        let prg_rom_size = (header[4] as usize) * PRG_ROM_PAGE_SIZE;
+        let mut chr_rom_size = (header[5] as usize) * CHR_ROM_PAGE_SIZE;
+        let chr_is_ram = if chr_rom_size == 0 {
+            chr_rom_size = CHR_ROM_PAGE_SIZE;
+            true
+        } else {
+            false
+        };
+
+        let mapper_number = (header[7] & 0xF0) | (header[6] >> 4);
+
+        let mut sram_size = (header[8] as usize) * SRAM_PAGE_SIZE;
+        if sram_size == 0 {
+            sram_size = SRAM_PAGE_SIZE;
+        }
+
+        let prg_rom_mask = prg_rom_size.wrapping_sub(1);
+        let chr_rom_mask = chr_rom_size.wrapping_sub(1);
+        let sram_addr_mask = sram_size.wrapping_sub(1);
+
+        println!("sram_size {:#06x} | sram mask {:#06x} | peristence {} | trainer {} | prg size {:#06x} | prg mask {:#06x} | chr size {:#06x} | chr mask {:#06x} | screen mirroring {:?} | mapper {}",
+        sram_size, sram_addr_mask, sram_is_persistent, has_trainer, prg_rom_size, prg_rom_mask, chr_rom_size, chr_rom_mask, mirror_type, mapper_number);
+
+        Ok(Self {
+            _ines_ver,
+            mirror_type,
+            sram_is_persistent,
+            chr_is_ram,
+            has_trainer,
+            prg_rom_size,
+            chr_rom_size,
+            sram_size,
+            mapper_number,
+            prg_rom_mask,
+            chr_rom_mask,
+            sram_addr_mask,
+        })
+    }
 }

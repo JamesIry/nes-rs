@@ -2,7 +2,7 @@ use crate::{
     bus::InterruptFlags,
     nes::cartridge::{
         mappers::{CartridgeCpuLocation, CartridgePpuLocation},
-        Mapper, MirrorType,
+        Mapper, MirrorType, NesHeader,
     },
 };
 
@@ -17,9 +17,9 @@ pub struct NRom {
 }
 
 impl NRom {
-    pub fn new(mirroring: MirrorType) -> Self {
+    pub fn new(nes_header: &NesHeader) -> Self {
         Self {
-            mirror_type: mirroring,
+            mirror_type: nes_header.mirror_type,
         }
     }
 }

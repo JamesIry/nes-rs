@@ -2,7 +2,7 @@ use crate::{
     bus::InterruptFlags,
     nes::cartridge::{
         mappers::{CartridgeCpuLocation, CartridgePpuLocation},
-        Mapper, MirrorType,
+        Mapper, MirrorType, NesHeader,
     },
 };
 
@@ -17,7 +17,7 @@ pub struct AxRom {
 }
 
 impl AxRom {
-    pub fn new() -> Self {
+    pub fn new(_nes_header: &NesHeader) -> Self {
         Self {
             mirror_mode: 0,
             prg_rom_converter: AddressConverter::new(0x8000, 32, 32, None),
