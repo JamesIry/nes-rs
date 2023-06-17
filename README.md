@@ -5,9 +5,10 @@ On my system, the only way to get acceptable performance is cargo run/build --re
 - [X] 6502
     - [X] Official opcodes
     - [X] Unofficial opcodes
-- [X] Cartridge Basics
-    - [X] Core
-    - [X] Mapper0/NROM
+- [ ]  Cartridge
+    - [X] Cartridge Core
+    - [X] INes 1.0
+    - [ ] INes 2.0
 - [X] Input
     - [X] General controller support infra
     - [X] Joypad
@@ -15,9 +16,9 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [X] Registers
     - [X] Scrolling
     - [X] Background rendering
+    - [X] Sprite DMA
     - [X] Sprite rendering
 - [ ] APU
-    - [X] Sprite DMA
     - [X] Pulse channels
     - [X] Mixer
     - [X] Play sounds
@@ -26,9 +27,20 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [ ] DMC channel (in progress)
 - [ ] Detailed Timing
     - [ ] Cycle correct 6502
-    - [ ] Fix NMI timing
+    - [ ] Accurate NMI timing
     - [ ] DMA should only pause CPU on 'read' cycle
-- [ ] Other Mappers
-    - [ ] Mapper1/MMC
-    - [ ] Other MMC deriviatives
+- [ ] Top 10 Mappers
+    - [ ] Mapper 1 
+    - [ ] Mapper 4 
+    - [X] Mapper 2 
+    - [X] Mapper 0 
+    - [X] Mapper 3 
+    - [X] Mapper 7 
+    - [ ] Mapper 206 
+    - [X] Mapper 11 
+    - [ ] Mapper 5 
+    - [ ] Mapper 19
+-[ ] Related Mappers
+    - [X] Mapper 94
+    - [X] Mapper 180
     - [ ] More TBD

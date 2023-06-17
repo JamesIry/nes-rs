@@ -3,11 +3,11 @@ use crate::nes::cartridge::{
     MirrorType,
 };
 
-use super::Mapper0;
+use super::NRom;
 
 #[test]
 fn test_mapping() {
-    let mut m = Mapper0::new(MirrorType::Vertical);
+    let mut m = NRom::new(MirrorType::Vertical);
 
     assert_eq!(
         CartridgePpuLocation::VRam(0x0000),
@@ -49,4 +49,3 @@ fn test_mapping() {
         m.translate_ppu_addr(0x3E99)
     );
 }
-
