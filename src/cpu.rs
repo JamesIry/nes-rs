@@ -24,6 +24,7 @@ use std::rc::Rc;
 
 use crate::bus::Bus;
 use crate::bus::BusDevice;
+use crate::bus::InterruptFlags;
 use crate::cpu::flags::*;
 use crate::cpu::instructions::*;
 
@@ -59,9 +60,8 @@ pub struct CPU {
     interrupt: Option<Interrupt>,
     pub monitor: Box<dyn Monitor>,
     bus: Bus,
-    nmi_enabled_now: bool,
+    interrupt_flags: InterruptFlags,
     nmi_was_enabled: bool,
-    irq_enabled_now: bool,
 }
 
 impl Default for CPU {
@@ -92,8 +92,7 @@ impl CPU {
             rdy: true,
             monitor: Box::new(NulMonitor {}),
             bus: Bus::new(),
-            irq_enabled_now: false,
-            nmi_enabled_now: false,
+            interrupt_flags: InterruptFlags::empty(),
             nmi_was_enabled: false,
         }
     }
@@ -138,21 +137,12 @@ impl CPU {
         self.interrupt = Some(Interrupt::RST);
         self.trapped = false;
 
-        self.irq_enabled_now = false;
-        self.nmi_enabled_now = false;
+        self.interrupt_flags = InterruptFlags::empty();
         self.nmi_was_enabled = false;
     }
 
-    pub fn nmi(&mut self, value: bool) {
-        self.nmi_enabled_now = value;
-    }
-
-    pub fn irq(&mut self, value: bool) {
-        self.irq_enabled_now = value;
-    }
-
     fn poll_interrupts(&mut self) {
-        if self.nmi_enabled_now {
+        if self.interrupt_flags.contains(InterruptFlags::NMI) {
             self.nmi_was_enabled = true;
         } else if self.nmi_was_enabled {
             if self.interrupt != Some(Interrupt::RST) {
@@ -162,7 +152,7 @@ impl CPU {
             self.nmi_was_enabled = false;
         }
 
-        if self.irq_enabled_now
+        if self.interrupt_flags.contains(InterruptFlags::IRQ)
             && self.interrupt.is_none()
             && !self.read_flag(StatusFlags::InterruptDisable)
         {
@@ -171,7 +161,12 @@ impl CPU {
         }
     }
 
+    fn clock_bus(&mut self) {
+        self.interrupt_flags = self.bus.clock();
+    }
+
     pub fn clock(&mut self) -> CPUCycleType {
+        self.clock_bus();
         if self.jammed || !self.rdy {
             self.poll_interrupts();
             return CPUCycleType::Read;

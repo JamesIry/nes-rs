@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use super::PPU;
 
 use crate::{
-    bus::BusDevice,
+    bus::{BusDevice, InterruptFlags},
     cpu::{CPUCycleType, CPUType, CPU},
     nes::apu::{APUCycleType, APU},
     nes::cartridge::{Cartridge, CartridgeCPUPort},
@@ -18,7 +18,7 @@ fn test_dma() {
         ));
 
         let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
-        let ppu = Rc::new(RefCell::new(PPU::new(PPU::nul_renderer())));
+        let ppu = Rc::new(RefCell::new(PPU::new()));
         let ram = Rc::new(RefCell::new(RAM::new(0x0000, 0x1FFF, 0x07FF)));
         let apu = Rc::new(RefCell::new(APU::new(cpu.clone())));
         cpu.as_ref().borrow_mut().add_device(ram.clone());
@@ -56,9 +56,12 @@ fn test_dma() {
             cpu.as_ref().borrow_mut().clock();
             assert!(!(cpu.borrow().is_rdy()));
             assert_eq!(cycles, cpu.as_ref().borrow_mut().cycles());
-            assert_eq!((false, true), ppu.as_ref().borrow_mut().clock());
-            assert_eq!((false, true), ppu.as_ref().borrow_mut().clock());
-            assert_eq!((false, true), ppu.as_ref().borrow_mut().clock());
+            assert!(!ppu.as_ref().borrow_mut().clock().0);
+            assert_eq!(InterruptFlags::NMI, ppu.as_ref().borrow_mut().bus_clock());
+            assert!(!ppu.as_ref().borrow_mut().clock().0);
+            assert_eq!(InterruptFlags::NMI, ppu.as_ref().borrow_mut().bus_clock());
+            assert!(!ppu.as_ref().borrow_mut().clock().0);
+            assert_eq!(InterruptFlags::NMI, ppu.as_ref().borrow_mut().bus_clock());
         }
 
         let _ = apu.as_ref().borrow_mut().clock(CPUCycleType::Read);

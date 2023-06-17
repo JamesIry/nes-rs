@@ -13,6 +13,7 @@ use cartridge::{Cartridge, CartridgeCPUPort, CartridgePPUPort};
 use ppu::PPU;
 
 use self::controllers::{Controller, NulController};
+use self::ppu::PixelInfo;
 #[cfg(test)]
 mod integration_tests {
     mod nestest;
@@ -31,11 +32,11 @@ pub struct NES {
 }
 
 impl NES {
-    pub fn new(renderer: Box<dyn FnMut(u16, u16, u8, u8, u8)>) -> Self {
+    pub fn new() -> Self {
         let cartridge = Rc::new(RefCell::new(Cartridge::nul_cartridge()));
 
         let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
-        let ppu = Rc::new(RefCell::new(PPU::new(renderer)));
+        let ppu = Rc::new(RefCell::new(PPU::new()));
         let apu = Rc::new(RefCell::new(APU::new(cpu.clone())));
 
         // 0x0000 - 0x1FFFF "work" RAM (WRAM)
@@ -84,7 +85,7 @@ impl NES {
         self.tick = 0;
     }
 
-    pub fn clock(&mut self) -> (bool, Option<f32>) {
+    pub fn clock(&mut self) -> (bool, Option<PixelInfo>, Option<f32>) {
         let mut audio_sample = None;
         if self.tick == 0 {
             {
@@ -94,23 +95,20 @@ impl NES {
                 let mut apu_borrowed = self.apu.as_ref().borrow_mut();
                 apu_borrowed.set_input_port1(input1);
                 apu_borrowed.set_input_port2(input2);
-                let (irq, sample) = apu_borrowed.clock(self.last_cycle_type);
+                let sample = apu_borrowed.clock(self.last_cycle_type);
                 audio_sample = Some(sample);
-
-                self.cpu.as_ref().borrow_mut().irq(irq);
             };
             self.last_cycle_type = self.cpu.as_ref().borrow_mut().clock();
         }
 
-        let (end_of_frame, nmi) = self.ppu.as_ref().borrow_mut().clock();
-        self.cpu.as_ref().borrow_mut().nmi(nmi);
+        let (end_of_frame, pixelinfo) = self.ppu.as_ref().borrow_mut().clock();
 
         self.tick += 1;
         if self.tick == 3 {
             self.tick = 0;
         }
 
-        (end_of_frame, audio_sample)
+        (end_of_frame, pixelinfo, audio_sample)
     }
 
     pub fn load_cartridge(&mut self, cartridge_name: String) -> Result<()> {
@@ -130,5 +128,11 @@ impl NES {
 
     pub fn plugin_controller2(&mut self, controller: Rc<RefCell<dyn Controller>>) {
         self.controller2 = controller;
+    }
+}
+
+impl Default for NES {
+    fn default() -> Self {
+        Self::new()
     }
 }

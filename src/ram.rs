@@ -1,4 +1,4 @@
-use crate::bus::BusDevice;
+use crate::bus::{BusDevice, InterruptFlags};
 
 pub struct RAM {
     start_addr: u16,
@@ -52,5 +52,9 @@ impl BusDevice for RAM {
         } else {
             panic!("Address out of range in RAM {}", addr)
         }
+    }
+
+    fn bus_clock(&mut self) -> InterruptFlags {
+        InterruptFlags::empty()
     }
 }

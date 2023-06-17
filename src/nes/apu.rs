@@ -7,7 +7,7 @@ extern crate bitflags;
 use std::{cell::RefCell, ops::Not, rc::Rc};
 
 use crate::{
-    bus::BusDevice,
+    bus::{BusDevice, InterruptFlags},
     cpu::{CPUCycleType, CPU},
 };
 
@@ -78,7 +78,7 @@ impl APU {
     }
 
     #[must_use]
-    pub fn clock(&mut self, cpu_cycle_type: CPUCycleType) -> (bool, f32) {
+    pub fn clock(&mut self, cpu_cycle_type: CPUCycleType) -> f32 {
         self.cycle_type = !self.cycle_type;
 
         self.manage_input_ports();
@@ -86,7 +86,7 @@ impl APU {
         self.manage_oam_dma(cpu_cycle_type);
         self.manage_frame_counter();
 
-        let mut result = (false, 0.0);
+        let mut result = 0.0;
         match self.resetting_state {
             ResettingState::Ready => {
                 let cycle_type = self.cycle_type;
@@ -112,12 +112,7 @@ impl APU {
                             + 100.0)
                 };
 
-                result = (
-                    self.sound_enable_register_high.intersects(
-                        SoundEnableFlags::FrameInterrupt | SoundEnableFlags::DMCInterrupt,
-                    ),
-                    pulse_out + tnd_out,
-                );
+                result = pulse_out + tnd_out
             }
             ResettingState::CountingDown(0) => {
                 self.resetting_state = ResettingState::Ready;
@@ -432,6 +427,17 @@ impl BusDevice for APU {
             old
         } else {
             panic!("Address out of range in APU {}", addr)
+        }
+    }
+
+    fn bus_clock(&mut self) -> InterruptFlags {
+        if self
+            .sound_enable_register_high
+            .intersects(SoundEnableFlags::FrameInterrupt | SoundEnableFlags::DMCInterrupt)
+        {
+            InterruptFlags::IRQ
+        } else {
+            InterruptFlags::empty()
         }
     }
 }

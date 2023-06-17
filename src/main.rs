@@ -27,6 +27,7 @@ const PPU_CLOCK_SPEED: usize = 5369318;
 // this buffer can be large. it's the working space
 // for blip_buff to create downsamples during a frame
 const BLIP_BUFF_SIZE: usize = 30000;
+const VOLUME: f32 = 0.5;
 
 fn main() -> Result<()> {
     let audio_host = cpal::default_host();
@@ -79,7 +80,7 @@ where
     let mut blip_buffer = [0; BLIP_BUFF_SIZE];
     blip.set_rates(PPU_CLOCK_SPEED as f64, stream_config.sample_rate.0 as f64);
 
-    let screen_buffer = Rc::new(RefCell::new(vec![0; NES_WIDTH * NES_HEIGHT]));
+    let mut screen_buffer = vec![0; NES_WIDTH * NES_HEIGHT];
 
     let args = env::args().collect::<Vec<String>>();
     let cartridge_name = if args.len() > 1 {
@@ -100,16 +101,8 @@ where
     };
 
     let mut window = Window::new("NES RS", SCREEN_WIDTH, SCREEN_HEIGHT, opts)?;
-    let render_clone = screen_buffer.clone();
 
-    let renderer = Box::new(move |x, y, r, g, b| {
-        let mut buffer = render_clone.as_ref().borrow_mut();
-        let color = (r as u32) << 16 | (g as u32) << 8 | (b as u32);
-        let (x, y) = (x as usize, y as usize);
-        buffer[y * NES_WIDTH + x] = color;
-    });
-
-    let mut nes = NES::new(renderer);
+    let mut nes = NES::new();
     nes.load_cartridge(cartridge_name.to_string())?;
     let joypad1 = Rc::new(RefCell::new(JoyPad::new()));
     nes.plugin_controller1(joypad1.clone());
@@ -121,14 +114,21 @@ where
     let mut last_sample = 0;
     let mut clocks = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        let (frame_complete, sample_opt) = nes.clock();
+        let (frame_complete, pixel_info, sample_opt) = nes.clock();
+
+        if let Some(p) = pixel_info {
+            let color = (p.r as u32) << 16 | (p.g as u32) << 8 | (p.b as u32);
+            let (x, y) = (p.x as usize, p.y as usize);
+            screen_buffer[y * NES_WIDTH + x] = color;
+        }
+
         if let Some(sample_float) = sample_opt {
             let sample = if muted {
                 0
             } else {
-                // we get samples from 0.0 to 1.0, convert to ranging from -1.0 to 1.0 with a clamp
+                // we get samples from 0.0 to 1.0, convert to ranging from -VOLUME to VOLUME with a clamp
                 // to make doubly sure
-                let sample_normed = (sample_float * 2.0 - 1.0).clamp(-1.0, 1.0);
+                let sample_normed = ((sample_float - 0.5) * VOLUME).clamp(-VOLUME, VOLUME);
                 // now convert that to -i16::MAX to +i16::MAX
                 (sample_normed * (i16::MAX as f32)) as i32
             };
@@ -140,7 +140,7 @@ where
         clocks += 1;
         if frame_complete {
             window
-                .update_with_buffer(&screen_buffer.as_ref().borrow(), NES_WIDTH, NES_HEIGHT)
+                .update_with_buffer(&screen_buffer, NES_WIDTH, NES_HEIGHT)
                 .unwrap();
 
             const DISPLAY_FRAME_RATE: bool = false;

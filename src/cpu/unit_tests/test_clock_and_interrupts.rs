@@ -1,4 +1,4 @@
-use crate::cpu::*;
+use crate::{bus::Interruptor, cpu::*};
 
 #[test]
 fn test_reset() {
@@ -24,6 +24,8 @@ fn test_reset() {
 #[test]
 fn test_nmi() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
+    let interruptor = Rc::new(RefCell::new(Interruptor::new()));
+    cpu.add_device(interruptor.clone());
 
     cpu.write_bus_byte(0xFFFC, 0x34);
     cpu.write_bus_byte(0xFFFD, 0x12);
@@ -33,9 +35,11 @@ fn test_nmi() {
     cpu.reset();
     cpu.run_instruction();
 
-    cpu.nmi(true);
+    interruptor.as_ref().borrow_mut().flags = InterruptFlags::NMI;
+    cpu.clock_bus();
     cpu.poll_interrupts();
-    cpu.nmi(false);
+    interruptor.as_ref().borrow_mut().flags = InterruptFlags::empty();
+    cpu.clock_bus();
     cpu.poll_interrupts();
     let cycles = cpu.run_instruction();
     assert_eq!(7, cycles);
@@ -52,6 +56,8 @@ fn test_nmi() {
 #[test]
 fn test_irq() {
     let (mut cpu, _mem) = crate::cpu::create_test_configuration();
+    let interruptor = Rc::new(RefCell::new(Interruptor::new()));
+    cpu.add_device(interruptor.clone());
 
     cpu.write_bus_byte(0xFFFC, 0x34);
     cpu.write_bus_byte(0xFFFD, 0x12);
@@ -64,11 +70,10 @@ fn test_irq() {
     cpu.run_instruction(); // run the reset
     cpu.run_instruction(); // SEI
     assert!(cpu.read_flag(StatusFlags::InterruptDisable));
-    cpu.irq(true); // should be masked
+    interruptor.as_ref().borrow_mut().flags = InterruptFlags::IRQ; // should be masked
     cpu.run_instruction(); // CLI
     assert_eq!(0x1236, cpu.pc);
     assert!(!cpu.read_flag(StatusFlags::InterruptDisable));
-    cpu.irq(true); // should work
     cpu.run_instruction();
     assert_eq!(0x89AB, cpu.pc);
     assert_eq!(0xFA, cpu.sp);

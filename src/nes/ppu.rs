@@ -8,12 +8,21 @@ mod unit_tests;
 
 use std::{cell::RefCell, rc::Rc};
 
-use crate::bus::{Bus, BusDevice};
+use crate::bus::{Bus, BusDevice, InterruptFlags};
 
 use self::{
     flags::{CtrlFlags, MaskFlags, StatusFlags},
     rgb::translate_nes_to_rgb,
 };
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PixelInfo {
+    pub x: u16,
+    pub y: u16,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
 
 const CPU_ADDR_START: u16 = 0x2000;
 const CPU_ADDR_END: u16 = 0x3FFF;
@@ -36,7 +45,6 @@ const INITIAL_PALETTE_VALUES: [u8; PALETTE_SIZE] = [
  */
 #[allow(clippy::upper_case_acronyms)]
 pub struct PPU {
-    renderer: Box<dyn FnMut(u16, u16, u8, u8, u8)>,
     ctrl_high_register: CtrlFlags,
     mask_register: MaskFlags,
     status_register: StatusFlags,
@@ -68,15 +76,9 @@ pub struct PPU {
 }
 
 impl PPU {
-    #[cfg(test)]
-    pub fn nul_renderer() -> Box<dyn FnMut(u16, u16, u8, u8, u8)> {
-        Box::new(|_x: u16, _y: u16, _r: u8, _g: u8, _b: u8| ())
-    }
-
-    pub fn new(renderer: Box<dyn FnMut(u16, u16, u8, u8, u8)>) -> Self {
+    pub fn new() -> Self {
         Self {
             resetting: true,
-            renderer,
             bus: Bus::new(),
             primary_oam: OAMData::new(),
             secondary_oam: OAMData::new(),
@@ -101,18 +103,18 @@ impl PPU {
         }
     }
 
-    #[must_use]
-    pub fn clock(&mut self) -> (bool, bool) {
+    pub fn clock(&mut self) -> (bool, Option<PixelInfo>) {
         self.manage_bus_request();
         self.manage_status();
+        let mut pixel_info = None;
         if self.rendering_enabled() && self.scan_line < 240 {
             self.manage_sprite_evaluation();
             self.manage_shift_registers();
-            self.manage_render();
+            pixel_info = self.manage_render();
             self.manage_scrolling();
         }
         let end_of_frame = self.manage_tick();
-        (end_of_frame, self.manage_nmi())
+        (end_of_frame, pixel_info)
     }
 
     fn rendering_enabled(&self) -> bool {
@@ -456,7 +458,7 @@ impl PPU {
         result
     }
 
-    fn manage_render(&mut self) {
+    fn manage_render(&mut self) -> Option<PixelInfo> {
         let x = self.tick;
         let y = self.scan_line as u16;
 
@@ -536,8 +538,9 @@ impl PPU {
             } else {
                 translate_nes_to_rgb(color)
             };
-            let f = &mut self.renderer;
-            f(x, y, r, g, b);
+            Some(PixelInfo { x, y, r, g, b })
+        } else {
+            None
         }
     }
 
@@ -592,12 +595,6 @@ impl PPU {
         let old = self.palettes[physical as usize];
         self.palettes[physical as usize] = data & 0b00111111;
         old
-    }
-
-    #[must_use]
-    fn manage_nmi(&mut self) -> bool {
-        !(self.read_status_flag(StatusFlags::VerticalBlank)
-            && self.read_ctrl_flag(CtrlFlags::NmiEnabled))
     }
 
     fn get_ctrl_flags(&self) -> CtrlFlags {
@@ -766,13 +763,23 @@ impl BusDevice for PPU {
             panic!("Address out of range in PPU {}", addr)
         }
     }
+
+    fn bus_clock(&mut self) -> InterruptFlags {
+        if !(self.read_status_flag(StatusFlags::VerticalBlank)
+            && self.read_ctrl_flag(CtrlFlags::NmiEnabled))
+        {
+            InterruptFlags::NMI
+        } else {
+            InterruptFlags::empty()
+        }
+    }
 }
 
 #[cfg(test)]
 pub fn create_test_configuration() -> (PPU, Rc<RefCell<crate::ram::RAM>>) {
     use crate::ram::RAM;
 
-    let mut ppu = PPU::new(PPU::nul_renderer());
+    let mut ppu = PPU::new();
     ppu.resetting = false;
     let mem = Rc::new(RefCell::new(RAM::new(0x0000, 0xFFFF, 0xFFFF)));
     ppu.add_device(mem.clone());

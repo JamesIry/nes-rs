@@ -26,7 +26,7 @@ fn test() {
     ));
 
     let cpu = Rc::new(RefCell::new(CPU::new(CPUType::RP2A03)));
-    let ppu = Rc::new(RefCell::new(PPU::new(PPU::nul_renderer())));
+    let ppu = Rc::new(RefCell::new(PPU::new()));
 
     // 0x0000 - 0x1FFFF RAM
     // NES ram is physically only 0x0000 - 0x07FF, but it's then "mirrored" 3 more

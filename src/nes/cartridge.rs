@@ -1,5 +1,8 @@
 mod mappers;
 
+#[cfg(test)]
+mod unit_tests;
+
 use mappers::mapper0::Mapper0;
 
 use anyhow::Result;
@@ -8,15 +11,17 @@ use thiserror::Error;
 
 use mappers::{CartridgeCpuLocation, Mapper};
 
-use crate::bus::BusDevice;
+use crate::bus::{BusDevice, InterruptFlags};
 
 use self::mappers::NulMapper;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[allow(dead_code)]
 pub enum MirrorType {
     Vertical,
     Horizontal,
     FourScreen,
+    SingleScreen(u8),
 }
 
 pub struct Cartridge {
@@ -41,7 +46,11 @@ static CHR_ROM_PAGE_SIZE: usize = 0x2000;
 static MAX_PRG_ROM_ADDRESSIBLE: usize = 0x8000;
 static MAX_CHR_ROM_ADDRESSIBLE: usize = 0x4000;
 static MAX_SRAM_ADDRESSIBLE: usize = 0x2000;
-static VRAM_SIZE: usize = 0x0800;
+// NES VRAM is actually half this, 0x0800, but by doubling we can use some 4 screen
+// mappers without building more ram into the cart.
+// mirror_vram() takes care of making sure we don't see memory outside the range we should
+// be for Vertical, Horizontal, and Single
+static VRAM_SIZE: usize = 0x1000;
 
 impl Cartridge {
     pub fn nul_cartridge() -> Self {
@@ -83,9 +92,10 @@ impl Cartridge {
         let vertical_mirroring = header[6] & 0x01 != 0;
 
         let screen_mirroring = match (four_screen, vertical_mirroring) {
-            (true, _) => MirrorType::FourScreen,
-            (false, true) => MirrorType::Vertical,
             (false, false) => MirrorType::Horizontal,
+            (false, true) => MirrorType::Vertical,
+            (true, false) => MirrorType::FourScreen,
+            (true, true) => MirrorType::SingleScreen(0),
         };
 
         let mapper_number = (header[7] & 0xF0) | (header[6] >> 4);
@@ -129,8 +139,8 @@ impl Cartridge {
 
         let sram = vec![0; sram_size];
 
-        //println!("sram_size {:#06x} | sram mask {:#06x} | peristence {} | trainer {} | prg size {:#06x} | prg mask {:#06x} | chr size {:#06x} | chr mask {:#06x} | screen mirroring {:?} ",
-        //sram_size, sram_addr_mask, sram_is_persistent, trainer, prg_rom_size, prg_rom_mask, chr_rom_size, chr_rom_mask, screen_mirroring);
+        println!("sram_size {:#06x} | sram mask {:#06x} | peristence {} | trainer {} | prg size {:#06x} | prg mask {:#06x} | chr size {:#06x} | chr mask {:#06x} | screen mirroring {:?} ",
+        sram_size, sram_addr_mask, sram_is_persistent, trainer, prg_rom_size, prg_rom_mask, chr_rom_size, chr_rom_mask, screen_mirroring);
 
         let vram = vec![0; VRAM_SIZE];
 
@@ -149,6 +159,28 @@ impl Cartridge {
         })
     }
 
+    fn mirror_vram(&self, addr: u16) -> u16 {
+        let raw_index = addr & 0xFFF; // mirror 0x2000-0x3FFF down to 0x0000 - 0x01FFF by turning off some bits
+
+        let name_table_requested = (raw_index >> 10) & 0b11;
+
+        let name_table_selected = match (self.mapper.mirror_type(), name_table_requested) {
+            (MirrorType::Horizontal, 0) => 0,
+            (MirrorType::Horizontal, 1) => 0,
+            (MirrorType::Horizontal, 2) => 1,
+            (MirrorType::Horizontal, 3) => 1,
+            (MirrorType::Vertical, 0) => 0,
+            (MirrorType::Vertical, 1) => 1,
+            (MirrorType::Vertical, 2) => 0,
+            (MirrorType::Vertical, 3) => 1,
+            (MirrorType::SingleScreen(n), _) => n as u16,
+            (MirrorType::FourScreen, n) => n,
+            (m, n) => unreachable!("Invalid miror and nametable {:?} {}", m, n),
+        };
+
+        (raw_index & !0b00110000000000) | (name_table_selected << 10)
+    }
+
     fn translate_cpu_addr(&mut self, addr: u16) -> CartridgeCpuLocation {
         if self.trainer && (0x7000..=0x71FF).contains(&addr) {
             CartridgeCpuLocation::Trainer(addr - 0x7000)
@@ -160,9 +192,6 @@ impl Cartridge {
     pub fn read_cpu(&mut self, addr: u16) -> u8 {
         let location = self.translate_cpu_addr(addr);
         match location {
-            mappers::CartridgeCpuLocation::None => {
-                panic!("CPU address out of range in cart {}", addr)
-            }
             mappers::CartridgeCpuLocation::SRam(addr) => {
                 self.sram[(addr & self.sram_addr_mask) as usize]
             }
@@ -172,15 +201,15 @@ impl Cartridge {
             mappers::CartridgeCpuLocation::PrgRom(addr) => {
                 self.prg_rom[(addr & self.prg_rom_mask) as usize]
             }
+            mappers::CartridgeCpuLocation::None => {
+                panic!("CPU address out of range in cart {}", addr)
+            }
         }
     }
 
     pub fn write_cpu(&mut self, addr: u16, data: u8) -> u8 {
         let location = self.translate_cpu_addr(addr);
         match location {
-            mappers::CartridgeCpuLocation::None => {
-                panic!("CPU address out of range in cart {}", addr)
-            }
             mappers::CartridgeCpuLocation::SRam(addr) => {
                 let old = self.sram[(addr & self.sram_addr_mask) as usize];
                 self.sram[(addr & self.sram_addr_mask) as usize] = data;
@@ -191,7 +220,10 @@ impl Cartridge {
                 self.trainer_ram[(addr & 0x01FF) as usize] = data;
                 old
             }
-            mappers::CartridgeCpuLocation::PrgRom(_) => 0,
+            mappers::CartridgeCpuLocation::PrgRom(_) => self.mapper.configure(addr, data),
+            mappers::CartridgeCpuLocation::None => {
+                panic!("CPU address out of range in cart {}", addr)
+            }
         }
     }
 
@@ -202,7 +234,10 @@ impl Cartridge {
                 let physical = (addr & self.chr_rom_mask) as usize;
                 self.chr_rom[physical]
             }
-            mappers::CartridgePpuLocation::VRam(addr) => self.vram[addr as usize],
+            mappers::CartridgePpuLocation::VRam(addr) => {
+                let physical = self.mirror_vram(addr);
+                self.vram[physical as usize]
+            }
             mappers::CartridgePpuLocation::None => {
                 panic!("PPU address out of range in cart {}", addr)
             }
@@ -219,7 +254,7 @@ impl Cartridge {
                 old
             }
             mappers::CartridgePpuLocation::VRam(addr) => {
-                let physical = addr as usize;
+                let physical = self.mirror_vram(addr) as usize;
                 let old = self.vram[physical];
                 self.vram[physical] = data;
                 old
@@ -253,6 +288,10 @@ impl BusDevice for CartridgeCPUPort {
     fn get_address_range(&self) -> (u16, u16) {
         (0x4020, 0xFFFF)
     }
+
+    fn bus_clock(&mut self) -> InterruptFlags {
+        self.cartridge.as_ref().borrow_mut().mapper.cpu_bus_clock()
+    }
 }
 
 pub struct CartridgePPUPort {
@@ -276,6 +315,11 @@ impl BusDevice for CartridgePPUPort {
 
     fn get_address_range(&self) -> (u16, u16) {
         (0x0000, 0x3EFF)
+    }
+
+    fn bus_clock(&mut self) -> crate::bus::InterruptFlags {
+        self.cartridge.as_ref().borrow_mut().mapper.ppu_bus_clock();
+        InterruptFlags::empty()
     }
 }
 
