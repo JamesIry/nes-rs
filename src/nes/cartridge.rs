@@ -1,7 +1,5 @@
+mod address_converters;
 mod mappers;
-
-#[cfg(test)]
-mod unit_tests;
 
 use mappers::nrom::NRom;
 
@@ -9,7 +7,7 @@ use anyhow::Result;
 use std::{cell::RefCell, fs::File, io::BufReader, io::Read, rc::Rc};
 use thiserror::Error;
 
-use mappers::{CartridgeCpuLocation, Mapper};
+use mappers::Mapper;
 
 use crate::{
     bus::{BusDevice, InterruptFlags},
@@ -19,7 +17,10 @@ use crate::{
     },
 };
 
-use self::mappers::NulMapper;
+use self::{
+    address_converters::{AddressConverter, BankedConverter, MirroredConverter},
+    mappers::NulMapper,
+};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(dead_code)]
@@ -30,15 +31,7 @@ pub enum MirrorType {
     SingleScreen(u8),
 }
 
-pub struct Cartridge {
-    nes_header: NesHeader,
-    sram: Vec<u8>,
-    trainer_ram: Vec<u8>,
-    prg_rom: Vec<u8>,
-    chr_rom: Vec<u8>,
-    mapper: Box<dyn Mapper>,
-    vram: Vec<u8>,
-}
+pub struct Cartridge {}
 
 static NES_TAG: [u8; 4] = [b'N', b'E', b'S', 0x1A];
 static SRAM_PAGE_SIZE: usize = 0x2000;
@@ -51,19 +44,7 @@ static CHR_ROM_PAGE_SIZE: usize = 0x2000;
 static VRAM_SIZE: usize = 0x1000;
 
 impl Cartridge {
-    pub fn nul_cartridge() -> Self {
-        Self {
-            sram: Vec::new(),
-            trainer_ram: Vec::new(),
-            prg_rom: Vec::new(),
-            chr_rom: Vec::new(),
-            mapper: Box::new(NulMapper {}),
-            vram: Vec::new(),
-            nes_header: NesHeader::nul_header(),
-        }
-    }
-
-    pub fn load(file_name: &str) -> Result<Self> {
+    pub fn load(file_name: &str) -> Result<Box<dyn Mapper>> {
         let file = File::open(file_name)?;
 
         let mut reader = BufReader::new(file);
@@ -73,218 +54,83 @@ impl Cartridge {
 
         let nes_header = NesHeader::new(&header)?;
 
-        let trainer_ram = if nes_header.has_trainer {
+        let mut sram_vec = vec![0; nes_header.sram_size];
+        if nes_header.has_trainer {
             let mut trainer_ram = vec![0; 512];
             reader.read_exact(&mut trainer_ram)?;
-            trainer_ram
-        } else {
-            Vec::new()
-        };
+            sram_vec[0x7000..(0x7000 + 512)].copy_from_slice(&trainer_ram[..512]);
+        }
+        let sram = MemoryRegion::new(
+            sram_vec,
+            0x4000,
+            0x7FFF,
+            8,
+            8.min(nes_header.sram_size / 1024) as u16,
+            false,
+        );
 
-        let mut prg_rom = vec![0; nes_header.prg_rom_size];
-        reader.read_exact(&mut prg_rom)?;
+        let mut prg_rom_vec = vec![0; nes_header.prg_rom_size];
+        reader.read_exact(&mut prg_rom_vec)?;
+        let prg_rom = MemoryRegion::new(
+            prg_rom_vec,
+            0x8000,
+            0xFFFF,
+            32,
+            32.min(nes_header.prg_rom_size / 1024) as u16,
+            true,
+        );
 
-        let mut chr_rom = vec![0; nes_header.chr_rom_size];
+        let mut chr_rom_vec = vec![0; nes_header.chr_rom_size];
         if !nes_header.chr_is_ram {
-            reader.read_exact(&mut chr_rom)?;
+            reader.read_exact(&mut chr_rom_vec)?;
         }
+        let chr_ram = MemoryRegion::new(
+            chr_rom_vec,
+            0x0000,
+            0x1FFF,
+            8,
+            8.min(nes_header.chr_rom_size / 1024) as u16,
+            !nes_header.chr_is_ram,
+        );
 
-        let sram = vec![0; nes_header.sram_size];
+        let vram_vec = vec![0; VRAM_SIZE];
+        let vram = MemoryRegion::new_vram(
+            vram_vec,
+            0x2000,
+            0x3EFF,
+            1,
+            1,
+            false,
+            nes_header.mirror_type,
+        );
 
-        let vram = vec![0; VRAM_SIZE];
+        let mapper_number = nes_header.mapper_number;
 
-        let mapper: Box<dyn Mapper> = match nes_header.mapper_number {
-            0 => Box::new(NRom::new(&nes_header)),
-            2 => Box::new(UxRom::new(&nes_header)),
-            3 => Box::new(CNRom::new(&nes_header)),
-            7 => Box::new(AxRom::new(&nes_header)),
-            11 => Box::new(ColorDreams::new(&nes_header)),
-            94 => Box::new(HvcUN1Rom::new(&nes_header)),
-            180 => Box::new(UxRomInvert::new(&nes_header)),
-            _ => Err(CartridgeError::UnsupportedMapper(nes_header.mapper_number))?,
-        };
-
-        Ok(Cartridge {
-            nes_header,
+        let core = CartridgeCore {
+            _nes_header: nes_header,
             sram,
-            trainer_ram,
             prg_rom,
-            chr_rom,
+            chr_ram,
             vram,
-            mapper,
-        })
-    }
-
-    fn mirror_vram(&self, addr: usize) -> usize {
-        let raw_index = addr & 0xFFF; // mirror 0x2000-0x3FFF down to 0x0000 - 0x01FFF by turning off some bits
-
-        let name_table_requested = (raw_index >> 10) & 0b11;
-
-        let name_table_selected = match (self.mapper.mirror_type(), name_table_requested) {
-            (MirrorType::Horizontal, 0) => 0,
-            (MirrorType::Horizontal, 1) => 0,
-            (MirrorType::Horizontal, 2) => 1,
-            (MirrorType::Horizontal, 3) => 1,
-            (MirrorType::Vertical, 0) => 0,
-            (MirrorType::Vertical, 1) => 1,
-            (MirrorType::Vertical, 2) => 0,
-            (MirrorType::Vertical, 3) => 1,
-            (MirrorType::SingleScreen(n), _) => n as usize,
-            (MirrorType::FourScreen, n) => n,
-            (m, n) => unreachable!("Invalid miror and nametable {:?} {}", m, n),
         };
 
-        (raw_index & !0b00110000000000) | (name_table_selected << 10)
+        let mapper: Box<dyn Mapper> = match mapper_number {
+            0 => Box::new(NRom::new(core)),
+            2 => Box::new(UxRom::new(core)),
+            3 => Box::new(CNRom::new(core)),
+            7 => Box::new(AxRom::new(core)),
+            11 => Box::new(ColorDreams::new(core)),
+            94 => Box::new(HvcUN1Rom::new(core)),
+            180 => Box::new(UxRomInvert::new(core)),
+            _ => Err(CartridgeError::UnsupportedMapper(mapper_number))?,
+        };
+
+        Ok(mapper)
     }
 
-    fn translate_cpu_addr(&mut self, addr: usize) -> CartridgeCpuLocation {
-        if self.nes_header.has_trainer && (0x7000..=0x71FF).contains(&addr) {
-            CartridgeCpuLocation::Trainer(addr - 0x7000)
-        } else {
-            self.mapper.translate_cpu_addr(addr)
-        }
+    pub(crate) fn nul_cartridge() -> Box<dyn Mapper> {
+        Box::new(NulMapper {})
     }
-
-    pub fn read_cpu(&mut self, addr: u16) -> u8 {
-        let location = self.translate_cpu_addr(addr as usize);
-        match location {
-            mappers::CartridgeCpuLocation::SRam(addr) => {
-                self.sram[addr & self.nes_header.sram_addr_mask]
-            }
-            mappers::CartridgeCpuLocation::Trainer(addr) => self.trainer_ram[addr & 0x01FF],
-            mappers::CartridgeCpuLocation::PrgRom(addr) => {
-                self.prg_rom[addr & self.nes_header.prg_rom_mask]
-            }
-            mappers::CartridgeCpuLocation::None => {
-                panic!("CPU address out of range in cart {}", addr)
-            }
-        }
-    }
-
-    pub fn write_cpu(&mut self, addr: u16, data: u8) -> u8 {
-        let location = self.translate_cpu_addr(addr as usize);
-        match location {
-            mappers::CartridgeCpuLocation::SRam(addr) => {
-                let old = self.sram[addr & self.nes_header.sram_addr_mask];
-                self.sram[addr & self.nes_header.sram_addr_mask] = data;
-                old
-            }
-            mappers::CartridgeCpuLocation::Trainer(addr) => {
-                let old = self.trainer_ram[addr & 0x01FF];
-                self.trainer_ram[addr & 0x01FF] = data;
-                old
-            }
-            mappers::CartridgeCpuLocation::PrgRom(_) => self.mapper.configure(addr, data),
-            mappers::CartridgeCpuLocation::None => {
-                panic!("CPU address out of range in cart {}", addr)
-            }
-        }
-    }
-
-    pub fn read_ppu(&mut self, addr: u16) -> u8 {
-        let location = self.mapper.translate_ppu_addr(addr as usize);
-        match location {
-            mappers::CartridgePpuLocation::ChrRom(addr) => {
-                let physical = addr & self.nes_header.chr_rom_mask;
-                self.chr_rom[physical]
-            }
-            mappers::CartridgePpuLocation::VRam(addr) => {
-                let physical = self.mirror_vram(addr);
-                self.vram[physical]
-            }
-            mappers::CartridgePpuLocation::None => {
-                panic!("PPU address out of range in cart {}", addr)
-            }
-        }
-    }
-
-    pub fn write_ppu(&mut self, addr: u16, data: u8) -> u8 {
-        let location = self.mapper.translate_ppu_addr(addr as usize);
-        match location {
-            mappers::CartridgePpuLocation::ChrRom(addr) => {
-                let physical = addr & self.nes_header.chr_rom_mask;
-                let old = self.chr_rom[physical];
-                self.chr_rom[physical] = data;
-                old
-            }
-            mappers::CartridgePpuLocation::VRam(addr) => {
-                let physical = self.mirror_vram(addr);
-                let old = self.vram[physical];
-                self.vram[physical] = data;
-                old
-            }
-            mappers::CartridgePpuLocation::None => {
-                panic!("PPU address out of range in cart {}", addr)
-            }
-        }
-    }
-}
-
-pub struct CartridgeCPUPort {
-    cartridge: Rc<RefCell<Cartridge>>,
-}
-
-impl CartridgeCPUPort {
-    pub fn new(cartridge: Rc<RefCell<Cartridge>>) -> Self {
-        Self { cartridge }
-    }
-}
-
-impl BusDevice for CartridgeCPUPort {
-    fn read(&mut self, addr: u16) -> u8 {
-        self.cartridge.borrow_mut().read_cpu(addr)
-    }
-
-    fn write(&mut self, addr: u16, data: u8) -> u8 {
-        self.cartridge.borrow_mut().write_cpu(addr, data)
-    }
-
-    fn get_address_range(&self) -> (u16, u16) {
-        (0x4020, 0xFFFF)
-    }
-
-    fn bus_clock(&mut self) -> InterruptFlags {
-        self.cartridge.as_ref().borrow_mut().mapper.cpu_bus_clock()
-    }
-}
-
-pub struct CartridgePPUPort {
-    cartridge: Rc<RefCell<Cartridge>>,
-}
-
-impl CartridgePPUPort {
-    pub fn new(cartridge: Rc<RefCell<Cartridge>>) -> Self {
-        Self { cartridge }
-    }
-}
-
-impl BusDevice for CartridgePPUPort {
-    fn read(&mut self, addr: u16) -> u8 {
-        self.cartridge.borrow_mut().read_ppu(addr)
-    }
-
-    fn write(&mut self, addr: u16, data: u8) -> u8 {
-        self.cartridge.borrow_mut().write_ppu(addr, data)
-    }
-
-    fn get_address_range(&self) -> (u16, u16) {
-        (0x0000, 0x3EFF)
-    }
-
-    fn bus_clock(&mut self) -> crate::bus::InterruptFlags {
-        self.cartridge.as_ref().borrow_mut().mapper.ppu_bus_clock();
-        InterruptFlags::empty()
-    }
-}
-
-#[derive(Error, Debug)]
-pub enum CartridgeError {
-    #[error("The file loaded in the cartridge wasn't recognized as having NES format")]
-    UnrecognizedFileFormat,
-    #[error("The file loaded in the cartridge has an unsupported NES version")]
-    UnsupportedInesVersion,
-    #[error("The file loaded requires  mapper {0} which isn't supported yet")]
-    UnsupportedMapper(u8),
 }
 
 pub struct NesHeader {
@@ -298,17 +144,8 @@ pub struct NesHeader {
     chr_rom_size: usize,
     sram_size: usize,
     mapper_number: u8,
-
-    prg_rom_mask: usize,
-    chr_rom_mask: usize,
-    sram_addr_mask: usize,
 }
 impl NesHeader {
-    fn nul_header() -> NesHeader {
-        const NUL_HEADER: [u8; 16] = [b'N', b'E', b'S', 0x1A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        Self::new(&NUL_HEADER).unwrap()
-    }
-
     fn new(header: &[u8; 16]) -> Result<NesHeader> {
         if header[0..4] != NES_TAG {
             Err(CartridgeError::UnrecognizedFileFormat)?;
@@ -347,12 +184,8 @@ impl NesHeader {
             sram_size = SRAM_PAGE_SIZE;
         }
 
-        let prg_rom_mask = prg_rom_size.wrapping_sub(1);
-        let chr_rom_mask = chr_rom_size.wrapping_sub(1);
-        let sram_addr_mask = sram_size.wrapping_sub(1);
-
-        println!("sram_size {:#06x} | sram mask {:#06x} | peristence {} | trainer {} | prg size {:#06x} | prg mask {:#06x} | chr size {:#06x} | chr mask {:#06x} | screen mirroring {:?} | mapper {}",
-        sram_size, sram_addr_mask, sram_is_persistent, has_trainer, prg_rom_size, prg_rom_mask, chr_rom_size, chr_rom_mask, mirror_type, mapper_number);
+        println!("sram_size {:#06x} | peristence {} | trainer {} | prg size {:#06x} | chr size {:#06x} | screen mirroring {:?} | mapper {}",
+        sram_size, sram_is_persistent, has_trainer, prg_rom_size, chr_rom_size, mirror_type, mapper_number);
 
         Ok(Self {
             _ines_ver,
@@ -364,9 +197,212 @@ impl NesHeader {
             chr_rom_size,
             sram_size,
             mapper_number,
-            prg_rom_mask,
-            chr_rom_mask,
-            sram_addr_mask,
         })
     }
+}
+
+pub struct MemoryRegion<T>
+where
+    T: AddressConverter,
+{
+    memory: Vec<u8>,
+    converter: T,
+    write_protect: bool,
+}
+
+impl MemoryRegion<BankedConverter> {
+    pub fn new(
+        memory: Vec<u8>,
+        start_address: u16,
+        end_address: u16,
+        bank_size: u16,
+        window_size: u16,
+        write_protect: bool,
+    ) -> MemoryRegion<BankedConverter> {
+        let max_size = memory.len();
+        MemoryRegion {
+            memory,
+            converter: BankedConverter::new(
+                start_address,
+                end_address,
+                bank_size,
+                window_size,
+                max_size,
+            ),
+            write_protect,
+        }
+    }
+}
+
+impl MemoryRegion<MirroredConverter> {
+    pub fn new_vram(
+        memory: Vec<u8>,
+        start_address: u16,
+        end_address: u16,
+        bank_size: u16,
+        window_size: u16,
+        write_protect: bool,
+        mirror_type: MirrorType,
+    ) -> MemoryRegion<MirroredConverter> {
+        let max_size = memory.len();
+        MemoryRegion {
+            memory,
+            converter: MirroredConverter::new(
+                mirror_type,
+                start_address,
+                end_address,
+                bank_size,
+                window_size,
+                max_size,
+            ),
+            write_protect,
+        }
+    }
+}
+
+impl<T> MemoryRegion<T>
+where
+    T: AddressConverter,
+{
+    pub fn read(&self, addr: u16) -> u8 {
+        self.memory[self.converter.convert(addr)]
+    }
+
+    pub fn read_from_bank(&self, bank: i16, addr: u16) -> u8 {
+        self.memory[self.converter.convert_from_bank(bank, addr)]
+    }
+
+    pub fn write(&mut self, addr: u16, value: u8) -> u8 {
+        let converted = self.converter.convert(addr);
+        let old = self.memory[converted];
+        if !self.write_protect {
+            self.memory[converted] = value;
+        }
+        old
+    }
+
+    #[allow(dead_code)]
+    pub fn write_to_bank(&mut self, bank: i16, addr: u16, value: u8) -> u8 {
+        let converted = self.converter.convert_from_bank(bank, addr);
+        let old = self.memory[converted];
+        if !self.write_protect {
+            self.memory[converted] = value;
+        }
+        old
+    }
+}
+
+pub struct CartridgeCore {
+    _nes_header: NesHeader,
+    sram: MemoryRegion<BankedConverter>,
+    prg_rom: MemoryRegion<BankedConverter>,
+    chr_ram: MemoryRegion<BankedConverter>,
+    vram: MemoryRegion<MirroredConverter>,
+}
+
+impl CartridgeCore {
+    fn read_cpu(&mut self, addr: u16) -> u8 {
+        if self.sram.converter.contains_addr(addr) {
+            self.sram.read(addr)
+        } else if self.prg_rom.converter.contains_addr(addr) {
+            self.prg_rom.read(addr)
+        } else {
+            panic!("Unrecognized address {}", addr)
+        }
+    }
+    fn write_cpu(&mut self, addr: u16, value: u8) -> u8 {
+        if self.sram.converter.contains_addr(addr) {
+            self.sram.write(addr, value)
+        } else if self.prg_rom.converter.contains_addr(addr) {
+            self.prg_rom.write(addr, value)
+        } else {
+            panic!("Unrecognized address {}", addr)
+        }
+    }
+
+    fn read_ppu(&mut self, addr: u16) -> u8 {
+        if self.chr_ram.converter.contains_addr(addr) {
+            self.chr_ram.read(addr)
+        } else if self.vram.converter.contains_addr(addr) {
+            self.vram.read(addr)
+        } else {
+            panic!("Unrecognized address {}", addr)
+        }
+    }
+    fn write_ppu(&mut self, addr: u16, value: u8) -> u8 {
+        if self.chr_ram.converter.contains_addr(addr) {
+            self.chr_ram.write(addr, value)
+        } else if self.vram.converter.contains_addr(addr) {
+            self.vram.write(addr, value)
+        } else {
+            panic!("Unrecognized address {}", addr)
+        }
+    }
+}
+
+pub struct CartridgeCPUPort {
+    cartridge: Rc<RefCell<Box<dyn Mapper>>>,
+}
+
+impl CartridgeCPUPort {
+    pub fn new(cartridge: Rc<RefCell<Box<dyn Mapper>>>) -> Self {
+        Self { cartridge }
+    }
+}
+
+impl BusDevice for CartridgeCPUPort {
+    fn read(&mut self, addr: u16) -> u8 {
+        self.cartridge.borrow_mut().read_cpu(addr)
+    }
+
+    fn write(&mut self, addr: u16, data: u8) -> u8 {
+        self.cartridge.borrow_mut().write_cpu(addr, data)
+    }
+
+    fn get_address_range(&self) -> (u16, u16) {
+        (0x4020, 0xFFFF)
+    }
+
+    fn bus_clock(&mut self) -> InterruptFlags {
+        self.cartridge.as_ref().borrow_mut().cpu_bus_clock()
+    }
+}
+
+pub struct CartridgePPUPort {
+    cartridge: Rc<RefCell<Box<dyn Mapper>>>,
+}
+
+impl CartridgePPUPort {
+    pub fn new(cartridge: Rc<RefCell<Box<dyn Mapper>>>) -> Self {
+        Self { cartridge }
+    }
+}
+
+impl BusDevice for CartridgePPUPort {
+    fn read(&mut self, addr: u16) -> u8 {
+        self.cartridge.borrow_mut().read_ppu(addr)
+    }
+
+    fn write(&mut self, addr: u16, data: u8) -> u8 {
+        self.cartridge.borrow_mut().write_ppu(addr, data)
+    }
+
+    fn get_address_range(&self) -> (u16, u16) {
+        (0x0000, 0x3EFF)
+    }
+
+    fn bus_clock(&mut self) -> crate::bus::InterruptFlags {
+        self.cartridge.as_ref().borrow_mut().ppu_bus_clock();
+        InterruptFlags::empty()
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum CartridgeError {
+    #[error("The file loaded in the cartridge wasn't recognized as having NES format")]
+    UnrecognizedFileFormat,
+    #[error("The file loaded in the cartridge has an unsupported NES version")]
+    UnsupportedInesVersion,
+    #[error("The file loaded requires  mapper {0} which isn't supported yet")]
+    UnsupportedMapper(u8),
 }

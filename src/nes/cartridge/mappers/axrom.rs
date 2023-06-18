@@ -1,61 +1,54 @@
 use crate::{
     bus::InterruptFlags,
-    nes::cartridge::{
-        mappers::{CartridgeCpuLocation, CartridgePpuLocation},
-        Mapper, MirrorType, NesHeader,
-    },
+    nes::cartridge::{address_converters::AddressConverter, CartridgeCore, Mapper, MirrorType},
 };
-
-use super::AddressConverter;
 
 /**
  * Mapper 7
  */
 pub struct AxRom {
     mirror_mode: u8,
-    prg_rom_converter: AddressConverter,
+    core: CartridgeCore,
 }
 
 impl AxRom {
-    pub fn new(_nes_header: &NesHeader) -> Self {
+    pub fn new(mut core: CartridgeCore) -> Self {
+        core.vram.converter.mirror_type = MirrorType::SingleScreen(0);
+        core.prg_rom.converter.bank_size = 32;
+        core.prg_rom.converter.window_size = 32;
         Self {
             mirror_mode: 0,
-            prg_rom_converter: AddressConverter::new(0x8000, 32, 32, None),
+            core,
         }
+    }
+
+    fn configure(&mut self, _addr: u16, value: u8) -> u8 {
+        let old = self.core.prg_rom.converter.bank | (self.mirror_mode << 4);
+        self.core.prg_rom.converter.bank = value & 0b00000111;
+        self.mirror_mode = (value & 0b00010000) >> 4;
+        self.core.vram.converter.mirror_type = MirrorType::SingleScreen(self.mirror_mode);
+        old
     }
 }
 
 impl Mapper for AxRom {
-    fn translate_cpu_addr(&mut self, addr: usize) -> CartridgeCpuLocation {
-        if (0x4000..=0x7FFF).contains(&addr) {
-            CartridgeCpuLocation::SRam(addr - 0x4000)
-        } else if addr >= 0x8000 {
-            CartridgeCpuLocation::PrgRom(self.prg_rom_converter.convert(addr))
+    fn read_cpu(&mut self, addr: u16) -> u8 {
+        self.core.read_cpu(addr)
+    }
+    fn write_cpu(&mut self, addr: u16, value: u8) -> u8 {
+        if self.core.prg_rom.converter.contains_addr(addr) {
+            self.configure(addr, value)
         } else {
-            CartridgeCpuLocation::None
+            self.core.write_cpu(addr, value)
         }
     }
 
-    fn translate_ppu_addr(&mut self, addr: usize) -> CartridgePpuLocation {
-        if (0x0000..=0x1FFF).contains(&addr) {
-            CartridgePpuLocation::ChrRom(addr)
-        } else if (0x2000..=0x3EFF).contains(&addr) {
-            CartridgePpuLocation::VRam(addr - 0x2000)
-        } else {
-            CartridgePpuLocation::None
-        }
+    fn read_ppu(&mut self, addr: u16) -> u8 {
+        self.core.read_ppu(addr)
     }
 
-    fn mirror_type(&self) -> MirrorType {
-        MirrorType::SingleScreen(self.mirror_mode)
-    }
-
-    fn configure(&mut self, _addr: u16, value: u8) -> u8 {
-        let old = self.prg_rom_converter.bank | (self.mirror_mode << 4);
-        self.prg_rom_converter.bank = value & 0b00000111;
-        self.mirror_mode = (value & 0b00010000) >> 4;
-
-        old
+    fn write_ppu(&mut self, addr: u16, value: u8) -> u8 {
+        self.core.write_ppu(addr, value)
     }
 
     fn cpu_bus_clock(&mut self) -> InterruptFlags {
