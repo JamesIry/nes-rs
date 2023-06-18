@@ -117,11 +117,12 @@ impl Cartridge {
         let mapper: Box<dyn Mapper> = match mapper_number {
             0 => Box::new(NRom::new(core)),
             2 => Box::new(UxRom::new(core)),
-            3 => Box::new(CNRom::new(core)),
+            3 => Box::new(CNRom::new(core, false)),
             7 => Box::new(AxRom::new(core)),
             11 => Box::new(ColorDreams::new(core)),
             94 => Box::new(HvcUN1Rom::new(core)),
             180 => Box::new(UxRomInvert::new(core)),
+            185 => Box::new(CNRom::new(core, true)),
             _ => Err(CartridgeError::UnsupportedMapper(mapper_number))?,
         };
 

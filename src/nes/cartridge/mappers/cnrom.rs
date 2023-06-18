@@ -4,17 +4,23 @@ use crate::{
 };
 
 /**
- * Mapper 3
+ * Mapper 3 (without copy protection)
+ * Mapper 185 (with copy protection)
  */
 pub struct CNRom {
     core: CartridgeCore,
+    remaining_junk_reads: u8,
 }
 
 impl CNRom {
-    pub fn new(mut core: CartridgeCore) -> Self {
+    pub fn new(mut core: CartridgeCore, copy_protection: bool) -> Self {
         core.chr_ram.converter.bank_size = 8;
         core.chr_ram.converter.window_size = 8;
-        Self { core }
+        let remaining_junk_reads = if copy_protection { 2 } else { 0 };
+        Self {
+            core,
+            remaining_junk_reads,
+        }
     }
 
     fn configure(&mut self, _addr: u16, value: u8) -> u8 {
@@ -37,7 +43,12 @@ impl Mapper for CNRom {
     }
 
     fn read_ppu(&mut self, addr: u16) -> u8 {
-        self.core.read_ppu(addr)
+        if addr == 0x2007 && self.remaining_junk_reads > 0 {
+            self.remaining_junk_reads -= 1;
+            0xFF
+        } else {
+            self.core.read_ppu(addr)
+        }
     }
 
     fn write_ppu(&mut self, addr: u16, value: u8) -> u8 {
