@@ -12,8 +12,7 @@ pub struct UxRom {
 
 impl UxRom {
     pub fn new(mut core: CartridgeCore) -> Self {
-        core.prg_rom.converter.bank_size = 16;
-        core.prg_rom.converter.window_size = 16;
+        core.prg_rom.converter.bank_size_k = 16;
         Self { core }
     }
 

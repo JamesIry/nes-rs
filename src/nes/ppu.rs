@@ -27,8 +27,8 @@ pub struct PixelInfo {
 const CPU_ADDR_START: u16 = 0x2000;
 const CPU_ADDR_END: u16 = 0x3FFF;
 const CPU_ADDR_MASK: u16 = 0x2007;
-const PALETTE_START: u16 = 0x3000;
-const PALETTE_END: u16 = 0xFFFF;
+const PALETTE_START: u16 = 0x3F00;
+const PALETTE_END: u16 = 0x3FFF;
 const PALETTE_SIZE: usize = 0x0020;
 const PALETTE_MASK: u16 = 0x001F;
 const PRIMARY_OAM_SIZE: usize = 0x0100;
@@ -180,14 +180,6 @@ impl PPU {
 
     #[allow(clippy::manual_range_contains)]
     fn manage_scrolling(&mut self) {
-        /*println!(
-            "tick {}, scan {}, scroll_x {}, scroll_y {}",
-            self.tick,
-            self.scan_line,
-            self.vram_address.get_x(),
-            self.vram_address.get_y()
-        );*/
-
         // manage scrolling
         match (self.scan_line, self.tick) {
             (_, t) if 1 <= t && t < 256 && t % 8 == 0 => self.vram_address.increment_coarse_x(),
@@ -672,7 +664,7 @@ impl BusDevice for PPU {
                 0x2005 => self.data_buffer,
                 0x2006 => self.data_buffer,
                 0x2007 => {
-                    let addr = self.vram_address.register;
+                    let addr = self.vram_address.register & 0x3FFF;
                     let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
                         self.read_palette(addr)
                     } else {
@@ -746,7 +738,7 @@ impl BusDevice for PPU {
                     }
                 }
                 0x2007 => {
-                    let addr = self.vram_address.register;
+                    let addr = self.vram_address.register & 0x3FFF;
                     let result = if (PALETTE_START..PALETTE_END).contains(&addr) {
                         self.write_palette(addr, data)
                     } else {
@@ -1076,7 +1068,7 @@ struct BGShiftRegisterSet {
     pattern_data: BGShiftRegisterPair,
 
     /**
-     * High and low bits for 2 bit pairs of pallet number for each tile
+     * High and low bits for 2 bit pairs of palette number for each tile
      */
     attribute_data: BGShiftRegisterPair,
 
@@ -1147,7 +1139,7 @@ impl BGShiftRegisterSet {
         self.pattern_data.bits(fine_x)
     }
 
-    fn get_pallete_number(&self, fine_x: u8) -> u16 {
+    fn get_palette_number(&self, fine_x: u8) -> u16 {
         self.attribute_data.bits(fine_x)
     }
 
@@ -1157,7 +1149,7 @@ impl BGShiftRegisterSet {
         let palette_number = if pixel_color_number == 0 {
             0
         } else {
-            self.get_pallete_number(fine_x)
+            self.get_palette_number(fine_x)
         };
 
         (palette_number, pixel_color_number)
@@ -1166,7 +1158,7 @@ impl BGShiftRegisterSet {
 
 /**
  * The PPU takes 2 cycles to read/write its bus, except for
- * palletes. So this enum represent a bus action to perform on
+ * palettes. So this enum represent a bus action to perform on
  * the next cycle
  */
 enum BusRequest {
@@ -1301,13 +1293,13 @@ impl SpriteRowData {
         let palette_number = if pixel_color_number == 0 {
             0
         } else {
-            self.get_pallete_number()
+            self.get_palette_number()
         };
 
         (0b0100 | palette_number, pixel_color_number)
     }
 
-    fn get_pallete_number(&self) -> u16 {
+    fn get_palette_number(&self) -> u16 {
         (self.attributes & 0b11) as u16
     }
 

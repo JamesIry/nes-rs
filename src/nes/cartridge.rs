@@ -1,21 +1,13 @@
 mod address_converters;
 mod mappers;
 
-use mappers::nrom::NRom;
-
 use anyhow::Result;
 use std::{cell::RefCell, fs::File, io::BufReader, io::Read, rc::Rc};
 use thiserror::Error;
 
 use mappers::Mapper;
 
-use crate::{
-    bus::{BusDevice, InterruptFlags},
-    nes::cartridge::mappers::{
-        axrom::AxRom, cnrom::CNRom, color_dreams::ColorDreams, hvc_un1rom::HvcUN1Rom, uxrom::UxRom,
-        uxrom_invert::UxRomInvert,
-    },
-};
+use crate::bus::{BusDevice, InterruptFlags};
 
 use self::{
     address_converters::{AddressConverter, BankedConverter, MirroredConverter},
@@ -35,13 +27,14 @@ pub struct Cartridge {}
 
 static NES_TAG: [u8; 4] = [b'N', b'E', b'S', 0x1A];
 static SRAM_PAGE_SIZE: usize = 0x2000;
+static DEFAULT_SRAM_SIZE: usize = 0x8000;
 static PRG_ROM_PAGE_SIZE: usize = 0x4000;
 static CHR_ROM_PAGE_SIZE: usize = 0x2000;
 // NES VRAM is actually half this, 0x0800, but by doubling we can use some 4 screen
 // mappers without building more ram into the cart.
 // mirror_vram() takes care of making sure we don't see memory outside the range we should
 // be for Vertical, Horizontal, and Single
-static VRAM_SIZE: usize = 0x1000;
+static VRAM_SIZE: usize = 0x2000;
 
 impl Cartridge {
     pub fn load(file_name: &str) -> Result<Box<dyn Mapper>> {
@@ -54,6 +47,10 @@ impl Cartridge {
 
         let nes_header = NesHeader::new(&header)?;
 
+        let rom_expansion_size = 0x2000;
+        let rom_expansion_vec = vec![0; rom_expansion_size];
+        let rom_expansion = MemoryRegion::new(rom_expansion_vec, 0x4000, 0x5FFF, 1, true);
+
         let mut sram_vec = vec![0; nes_header.sram_size];
         if nes_header.has_trainer {
             let mut trainer_ram = vec![0; 512];
@@ -62,9 +59,8 @@ impl Cartridge {
         }
         let sram = MemoryRegion::new(
             sram_vec,
-            0x4000,
+            0x6000,
             0x7FFF,
-            8,
             8.min(nes_header.sram_size / 1024) as u16,
             false,
         );
@@ -75,58 +71,38 @@ impl Cartridge {
             prg_rom_vec,
             0x8000,
             0xFFFF,
-            32,
             32.min(nes_header.prg_rom_size / 1024) as u16,
             true,
         );
 
         let mut chr_rom_vec = vec![0; nes_header.chr_rom_size];
-        if !nes_header.chr_is_ram {
+        if nes_header.chr_is_rom {
             reader.read_exact(&mut chr_rom_vec)?;
         }
         let chr_ram = MemoryRegion::new(
             chr_rom_vec,
             0x0000,
             0x1FFF,
-            8,
             8.min(nes_header.chr_rom_size / 1024) as u16,
-            !nes_header.chr_is_ram,
+            nes_header.chr_is_rom,
         );
 
         let vram_vec = vec![0; VRAM_SIZE];
-        let vram = MemoryRegion::new_vram(
-            vram_vec,
-            0x2000,
-            0x3EFF,
-            1,
-            1,
-            false,
-            nes_header.mirror_type,
-        );
+        let vram =
+            MemoryRegion::new_vram(vram_vec, 0x2000, 0x3EFF, 1, false, nes_header.mirror_type);
 
         let mapper_number = nes_header.mapper_number;
 
         let core = CartridgeCore {
             _nes_header: nes_header,
+            rom_expansion,
             sram,
             prg_rom,
             chr_ram,
             vram,
         };
 
-        let mapper: Box<dyn Mapper> = match mapper_number {
-            0 => Box::new(NRom::new(core)),
-            2 => Box::new(UxRom::new(core)),
-            3 => Box::new(CNRom::new(core, false)),
-            7 => Box::new(AxRom::new(core)),
-            11 => Box::new(ColorDreams::new(core)),
-            94 => Box::new(HvcUN1Rom::new(core)),
-            180 => Box::new(UxRomInvert::new(core)),
-            185 => Box::new(CNRom::new(core, true)),
-            _ => Err(CartridgeError::UnsupportedMapper(mapper_number))?,
-        };
-
-        Ok(mapper)
+        mappers::get_mapper(mapper_number, core)
     }
 
     pub(crate) fn nul_cartridge() -> Box<dyn Mapper> {
@@ -139,7 +115,7 @@ pub struct NesHeader {
     mirror_type: MirrorType,
     #[allow(dead_code)]
     sram_is_persistent: bool,
-    chr_is_ram: bool,
+    chr_is_rom: bool,
     has_trainer: bool,
     prg_rom_size: usize,
     chr_rom_size: usize,
@@ -171,28 +147,29 @@ impl NesHeader {
 
         let prg_rom_size = (header[4] as usize) * PRG_ROM_PAGE_SIZE;
         let mut chr_rom_size = (header[5] as usize) * CHR_ROM_PAGE_SIZE;
-        let chr_is_ram = if chr_rom_size == 0 {
+        let chr_is_rom = if chr_rom_size == 0 {
             chr_rom_size = CHR_ROM_PAGE_SIZE;
-            true
-        } else {
             false
+        } else {
+            true
         };
 
         let mapper_number = (header[7] & 0xF0) | (header[6] >> 4);
 
         let mut sram_size = (header[8] as usize) * SRAM_PAGE_SIZE;
         if sram_size == 0 {
-            sram_size = SRAM_PAGE_SIZE;
+            sram_size = DEFAULT_SRAM_SIZE;
         }
 
-        println!("sram_size {:#06x} | peristence {} | trainer {} | prg size {:#06x} | chr size {:#06x} | screen mirroring {:?} | mapper {}",
-        sram_size, sram_is_persistent, has_trainer, prg_rom_size, chr_rom_size, mirror_type, mapper_number);
+        let chr_rom_ram = if chr_is_rom { "rom" } else { "ram" };
+        println!("sram_size {:#06x} | peristence {} | trainer {} | prg rom size {:#06x} | chr {} size {:#06x} | screen mirroring {:?} | mapper {}",
+        sram_size, sram_is_persistent, has_trainer, prg_rom_size, chr_rom_ram, chr_rom_size, mirror_type, mapper_number);
 
         Ok(Self {
             _ines_ver,
             mirror_type,
             sram_is_persistent,
-            chr_is_ram,
+            chr_is_rom,
             has_trainer,
             prg_rom_size,
             chr_rom_size,
@@ -216,20 +193,13 @@ impl MemoryRegion<BankedConverter> {
         memory: Vec<u8>,
         start_address: u16,
         end_address: u16,
-        bank_size: u16,
-        window_size: u16,
+        bank_size_k: u16,
         write_protect: bool,
     ) -> MemoryRegion<BankedConverter> {
         let max_size = memory.len();
         MemoryRegion {
             memory,
-            converter: BankedConverter::new(
-                start_address,
-                end_address,
-                bank_size,
-                window_size,
-                max_size,
-            ),
+            converter: BankedConverter::new(start_address, end_address, bank_size_k, max_size),
             write_protect,
         }
     }
@@ -240,8 +210,7 @@ impl MemoryRegion<MirroredConverter> {
         memory: Vec<u8>,
         start_address: u16,
         end_address: u16,
-        bank_size: u16,
-        window_size: u16,
+        bank_size_k: u16,
         write_protect: bool,
         mirror_type: MirrorType,
     ) -> MemoryRegion<MirroredConverter> {
@@ -252,8 +221,7 @@ impl MemoryRegion<MirroredConverter> {
                 mirror_type,
                 start_address,
                 end_address,
-                bank_size,
-                window_size,
+                bank_size_k,
                 max_size,
             ),
             write_protect,
@@ -270,7 +238,8 @@ where
     }
 
     pub fn read_from_bank(&self, bank: i16, addr: u16) -> u8 {
-        self.memory[self.converter.convert_from_bank(bank, addr)]
+        let converted = self.converter.convert_from_bank(bank, addr);
+        self.memory[converted]
     }
 
     pub fn write(&mut self, addr: u16, value: u8) -> u8 {
@@ -295,6 +264,7 @@ where
 
 pub struct CartridgeCore {
     _nes_header: NesHeader,
+    rom_expansion: MemoryRegion<BankedConverter>,
     sram: MemoryRegion<BankedConverter>,
     prg_rom: MemoryRegion<BankedConverter>,
     chr_ram: MemoryRegion<BankedConverter>,
@@ -307,6 +277,8 @@ impl CartridgeCore {
             self.sram.read(addr)
         } else if self.prg_rom.converter.contains_addr(addr) {
             self.prg_rom.read(addr)
+        } else if self.rom_expansion.converter.contains_addr(addr) {
+            self.rom_expansion.read(addr)
         } else {
             panic!("Unrecognized address {}", addr)
         }
@@ -316,6 +288,8 @@ impl CartridgeCore {
             self.sram.write(addr, value)
         } else if self.prg_rom.converter.contains_addr(addr) {
             self.prg_rom.write(addr, value)
+        } else if self.rom_expansion.converter.contains_addr(addr) {
+            self.rom_expansion.write(addr, value)
         } else {
             panic!("Unrecognized address {}", addr)
         }

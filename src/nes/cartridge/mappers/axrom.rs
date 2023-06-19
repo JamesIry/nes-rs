@@ -14,8 +14,7 @@ pub struct AxRom {
 impl AxRom {
     pub fn new(mut core: CartridgeCore) -> Self {
         core.vram.converter.mirror_type = MirrorType::SingleScreen(0);
-        core.prg_rom.converter.bank_size = 32;
-        core.prg_rom.converter.window_size = 32;
+        core.prg_rom.converter.bank_size_k = 32;
         Self {
             mirror_mode: 0,
             core,

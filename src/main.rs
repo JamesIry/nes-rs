@@ -37,7 +37,6 @@ fn main() -> Result<()> {
     let audio_config = audio_device.default_output_config()?;
     let audio_format = audio_config.sample_format();
 
-    println!("{audio_format}");
     let run = match audio_format {
         cpal::SampleFormat::I8 => run::<i8>,
         cpal::SampleFormat::I16 => run::<i16>,

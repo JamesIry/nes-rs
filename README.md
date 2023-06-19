@@ -30,7 +30,7 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [ ] Accurate NMI timing
     - [ ] DMA should only pause CPU on 'read' cycle
 - [ ] Top 10 Mappers
-    - [ ] Mapper 1 
+    - [ ] Mapper 1 (in progress)
     - [ ] Mapper 4 
     - [X] Mapper 2 
     - [X] Mapper 0 
@@ -42,6 +42,8 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [ ] Mapper 19
 - [ ] Related Mappers
     - [X] Mapper 94
+    - [ ] Mapper 105
+    - [ ] Mapper 155
     - [X] Mapper 180
     - [X] Mapper 185
     - [ ] More TBD

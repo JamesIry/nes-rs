@@ -14,8 +14,7 @@ pub struct CNRom {
 
 impl CNRom {
     pub fn new(mut core: CartridgeCore, copy_protection: bool) -> Self {
-        core.chr_ram.converter.bank_size = 8;
-        core.chr_ram.converter.window_size = 8;
+        core.chr_ram.converter.bank_size_k = 8;
         let remaining_junk_reads = if copy_protection { 2 } else { 0 };
         Self {
             core,

@@ -12,10 +12,8 @@ pub struct ColorDreams {
 
 impl ColorDreams {
     pub fn new(mut core: CartridgeCore) -> Self {
-        core.prg_rom.converter.bank_size = 32;
-        core.prg_rom.converter.window_size = 32;
-        core.chr_ram.converter.bank_size = 8;
-        core.chr_ram.converter.window_size = 8;
+        core.prg_rom.converter.bank_size_k = 32;
+        core.chr_ram.converter.bank_size_k = 8;
         Self { core }
     }
 

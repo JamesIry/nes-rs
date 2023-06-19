@@ -13,25 +13,17 @@ pub struct BankedConverter {
     pub bank: u8,
     pub start_address: u16,
     pub end_address: u16,
-    pub bank_size: u16,
-    pub window_size: u16,
+    pub bank_size_k: u16,
     pub max_size: usize,
 }
 
 impl BankedConverter {
-    pub fn new(
-        start_address: u16,
-        end_address: u16,
-        bank_size: u16,
-        window_size: u16,
-        max_size: usize,
-    ) -> Self {
+    pub fn new(start_address: u16, end_address: u16, bank_size_k: u16, max_size: usize) -> Self {
         Self {
             bank: 0,
             start_address,
             end_address,
-            bank_size,
-            window_size,
+            bank_size_k,
             max_size,
         }
     }
@@ -44,14 +36,14 @@ impl AddressConverter for BankedConverter {
 
     fn convert_from_bank(&self, bank_number: i16, addr: u16) -> usize {
         let base = if bank_number >= 0 {
-            bank_number as usize * k_to_usize(self.bank_size)
+            bank_number as usize * k_to_usize(self.bank_size_k)
         } else {
             self.max_size
-                .wrapping_sub((-bank_number) as usize * k_to_usize(self.bank_size))
+                .wrapping_sub((-bank_number) as usize * k_to_usize(self.bank_size_k))
         };
-        let offset = ((addr - self.start_address) as usize) % k_to_usize(self.window_size);
+        let offset = ((addr - self.start_address) as usize) % k_to_usize(self.bank_size_k);
 
-        base + offset
+        (base + offset) % self.max_size
     }
 
     fn contains_addr(&self, addr: u16) -> bool {
@@ -63,8 +55,7 @@ pub struct MirroredConverter {
     pub mirror_type: MirrorType,
     pub start_address: u16,
     pub end_address: u16,
-    pub bank_size: u16,
-    pub window_size: u16,
+    pub bank_size_k: u16,
     pub max_size: usize,
 }
 
@@ -73,16 +64,14 @@ impl MirroredConverter {
         mirror_type: MirrorType,
         start_address: u16,
         end_address: u16,
-        bank_size: u16,
-        window_size: u16,
+        bank_size_k: u16,
         max_size: usize,
     ) -> Self {
         Self {
             mirror_type,
             start_address,
             end_address,
-            bank_size,
-            window_size,
+            bank_size_k,
             max_size,
         }
     }
@@ -101,24 +90,24 @@ impl AddressConverter for MirroredConverter {
             (MirrorType::Vertical, 1) => 1,
             (MirrorType::Vertical, 2) => 0,
             (MirrorType::Vertical, 3) => 1,
-            (MirrorType::SingleScreen(n), _) => n as u16,
-            (MirrorType::FourScreen, n) => n,
+            (MirrorType::SingleScreen(n), _) => n as i16,
+            (MirrorType::FourScreen, n) => n as i16,
             (m, n) => unreachable!("Invalid miror and nametable {:?} {}", m, n),
         };
 
-        self.convert_from_bank(name_table_selected as i16, addr)
+        self.convert_from_bank(name_table_selected, addr)
     }
 
     fn convert_from_bank(&self, bank_number: i16, addr: u16) -> usize {
         let base = if bank_number >= 0 {
-            bank_number as usize * k_to_usize(self.bank_size)
+            bank_number as usize * k_to_usize(self.bank_size_k)
         } else {
             self.max_size
-                .wrapping_sub((-bank_number) as usize * k_to_usize(self.bank_size))
+                .wrapping_sub((-bank_number) as usize * k_to_usize(self.bank_size_k))
         };
-        let offset = ((addr - self.start_address) as usize) % k_to_usize(self.window_size);
+        let offset = ((addr - self.start_address) as usize) % k_to_usize(self.bank_size_k);
 
-        base + offset
+        (base + offset) % self.max_size
     }
 
     fn contains_addr(&self, addr: u16) -> bool {

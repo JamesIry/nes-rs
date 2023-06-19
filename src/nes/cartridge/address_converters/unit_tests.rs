@@ -5,7 +5,7 @@ use crate::nes::cartridge::{
 
 #[test]
 fn test_vertical_mirroring() {
-    let c = MirroredConverter::new(MirrorType::Vertical, 0x2000, 0x3EFF, 0x1000, 0x1000, 0x2000);
+    let c = MirroredConverter::new(MirrorType::Vertical, 0x2000, 0x3EFF, 1, 0x2000);
 
     assert_eq!(0x0000, c.convert(0x2000));
 
@@ -22,11 +22,15 @@ fn test_vertical_mirroring() {
     assert_eq!(0x0400, c.convert(0x2C00));
 
     assert_eq!(0x0799, c.convert(0x2F99));
+
+    for i in 0..=0x0EFF {
+        assert_eq!(c.convert(0x2000 + i), c.convert(0x3000 + i));
+    }
 }
 
 #[test]
 fn test_horizontal_mirroring() {
-    let c = MirroredConverter::new(MirrorType::Vertical, 0x2000, 0x3EFF, 0x1000, 0x1000, 0x2000);
+    let c = MirroredConverter::new(MirrorType::Horizontal, 0x2000, 0x3EFF, 1, 0x2000);
 
     assert_eq!(0x0000, c.convert(0x2000));
 
@@ -43,4 +47,8 @@ fn test_horizontal_mirroring() {
     assert_eq!(0x0400, c.convert(0x2C00));
 
     assert_eq!(0x0799, c.convert(0x2F99));
+
+    for i in 0..=0x0EFF {
+        assert_eq!(c.convert(0x2000 + i), c.convert(0x3000 + i));
+    }
 }
