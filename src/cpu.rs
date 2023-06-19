@@ -166,67 +166,73 @@ impl CPU {
     }
 
     pub fn clock(&mut self) -> CPUCycleType {
-        self.clock_bus();
-        if self.jammed || !self.rdy {
-            self.poll_interrupts();
-            return CPUCycleType::Read;
-        }
-
-        let cycle_type = if self.remaining_cycles > 0 {
-            if self.remaining_cycles == 1 {
-                let (page_boundary, branch_taken) = self.execute(self.instruction, self.mode);
-                if page_boundary == PageBoundary::Crossed && self.cycle_on_page_boundary {
-                    self.extra_cycles += 1;
-                }
-                if branch_taken == Branch::Taken {
-                    self.extra_cycles += 1;
-                }
-                self.monitor.end_instruction().unwrap(); // TODO propogate error
-                self.poll_interrupts();
-            }
-            self.remaining_cycles -= 1;
-            CPUCycleType::Write
-        } else if self.extra_cycles > 0 {
-            self.extra_cycles -= 1;
-            CPUCycleType::Read
+        let (cycle_type, instruction_complete) = if self.jammed || !self.rdy {
+            (CPUCycleType::Read, true)
         } else {
-            let (instruction, mode, cycles, cycle_on_boundary) = match self.interrupt {
-                Some(interrupt) => {
-                    let instruction = match interrupt {
-                        Interrupt::BRK => {
-                            unreachable!("Interrupted with BRK, which shouldn't be possible")
-                        }
-                        Interrupt::IRQ => Instruction::IRQ,
-                        Interrupt::NMI => Instruction::NMI,
-                        Interrupt::RST => Instruction::RST,
-                    };
-                    (instruction, Mode::Imp, 7, false)
-                }
-                None => {
-                    self.monitor
-                        .new_instruction(
-                            self.cycles,
-                            self.pc,
-                            self.sp,
-                            self.a,
-                            self.x,
-                            self.y,
-                            self.status.bits(),
-                        )
-                        .unwrap(); // TODO propogate error
-                    let op = self.fetch_byte();
-                    crate::cpu::decode::decode(op)
-                }
-            };
+            let (cycle_type, instruction_complete) = if self.remaining_cycles > 0 {
+                let instruction_complete = if self.remaining_cycles == 1 {
+                    let (page_boundary, branch_taken) = self.execute(self.instruction, self.mode);
+                    if page_boundary == PageBoundary::Crossed && self.cycle_on_page_boundary {
+                        self.extra_cycles += 1;
+                    }
+                    if branch_taken == Branch::Taken {
+                        self.extra_cycles += 1;
+                    }
+                    self.monitor.end_instruction().unwrap(); // TODO propogate error
+                    true
+                } else {
+                    false
+                };
+                self.remaining_cycles -= 1;
+                (CPUCycleType::Write, instruction_complete)
+            } else if self.extra_cycles > 0 {
+                self.extra_cycles -= 1;
+                (CPUCycleType::Read, false)
+            } else {
+                let (instruction, mode, cycles, cycle_on_boundary) = match self.interrupt {
+                    Some(interrupt) => {
+                        let instruction = match interrupt {
+                            Interrupt::BRK => {
+                                unreachable!("Interrupted with BRK, which shouldn't be possible")
+                            }
+                            Interrupt::IRQ => Instruction::IRQ,
+                            Interrupt::NMI => Instruction::NMI,
+                            Interrupt::RST => Instruction::RST,
+                        };
+                        (instruction, Mode::Imp, 7, false)
+                    }
+                    None => {
+                        self.monitor
+                            .new_instruction(
+                                self.cycles,
+                                self.pc,
+                                self.sp,
+                                self.a,
+                                self.x,
+                                self.y,
+                                self.status.bits(),
+                            )
+                            .unwrap(); // TODO propogate error
+                        let op = self.fetch_byte();
+                        crate::cpu::decode::decode(op)
+                    }
+                };
 
-            self.instruction = instruction;
-            self.mode = mode;
-            self.remaining_cycles = cycles.wrapping_sub(1);
-            self.extra_cycles = 0;
-            self.cycle_on_page_boundary = cycle_on_boundary;
-            CPUCycleType::Read
+                self.instruction = instruction;
+                self.mode = mode;
+                self.remaining_cycles = cycles.wrapping_sub(1);
+                self.extra_cycles = 0;
+                self.cycle_on_page_boundary = cycle_on_boundary;
+                (CPUCycleType::Read, false)
+            };
+            self.cycles += 1;
+            (cycle_type, instruction_complete)
         };
-        self.cycles += 1;
+
+        if instruction_complete {
+            self.poll_interrupts();
+        }
+        self.clock_bus();
         cycle_type
     }
 

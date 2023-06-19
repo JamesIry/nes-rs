@@ -23,7 +23,7 @@ fn test_x_scroll() {
     assert_eq!(0, ppu.vram_address.get_nametable_bits());
     assert_eq!(0, ppu.temporary_vram_address.get_nametable_bits());
 
-    ppu.tick = 256;
+    ppu.dot = 256;
     ppu.scan_line = -1;
     assert!(!ppu.clock().0);
     assert_eq!(InterruptFlags::empty(), ppu.bus_clock());
@@ -157,16 +157,16 @@ fn test_scroll_post_render() {
 
     for scanline in 240..=260 {
         ppu.scan_line = scanline;
-        ppu.tick = 0;
+        ppu.dot = 0;
         for _ in 0..=340 {
             assert_eq!(30, ppu.vram_address.get_coarse_x());
             assert_eq!(87, ppu.vram_address.get_y());
             assert_eq!(2, ppu.vram_address.get_nametable_bits());
             assert_eq!(
                 ppu.clock().0,
-                ppu.scan_line == -1 && ppu.tick == 0,
+                ppu.scan_line == -1 && ppu.dot == 0,
                 "{}, {}",
-                ppu.tick,
+                ppu.dot,
                 ppu.scan_line
             );
             assert_eq!(InterruptFlags::empty(), ppu.bus_clock());

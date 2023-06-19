@@ -41,7 +41,7 @@ impl MMC1 {
             cycle_count: 0,
             last_write_cycle: 0xFFFF,
         };
-        result.reconfigure();
+        result.reconfigure_banks();
 
         result
     }
@@ -55,7 +55,7 @@ impl MMC1 {
                 self.control_reg |= 0b00001100;
                 self.shift_count = 0;
                 self.shift_register = 0;
-                self.reconfigure();
+                self.reconfigure_banks();
             } else {
                 self.shift_register >>= 1;
                 self.shift_register |= (value & 0b00000001) << 4;
@@ -71,27 +71,40 @@ impl MMC1 {
                         0xE000..=0xFFFF => self.set_prg_reg(value),
                         _ => unreachable!("Couldn't find register for {}", addr),
                     }
-                    self.reconfigure();
+                    self.reconfigure_banks();
                 }
             }
         }
         old
     }
 
-    fn reconfigure(&mut self) {
-        self.core.vram.converter.mirror_type = match self.mirror_mode() {
+    fn reconfigure_banks(&mut self) {
+        let mirror_type = match self.mirror_mode() {
             0 => MirrorType::SingleScreen(0),
             1 => MirrorType::SingleScreen(1),
             2 => MirrorType::Vertical,
             3 => MirrorType::Horizontal,
             _ => unreachable!("Invalid mirror mode {}", self.mirror_mode()),
         };
+        if mirror_type != self.core.vram.converter.mirror_type {
+            println!(
+                "mirror {:?} -> {:?}",
+                self.core.vram.converter.mirror_type, mirror_type
+            );
+        }
+        self.core.vram.converter.mirror_type = mirror_type;
 
         let prg_bank_size = match self.prg_bank_mode() {
             0..=1 => 32,
             2..=3 => 16,
             _ => unreachable!("Invalid prg bank mode {}", self.prg_bank_mode()),
         };
+        if prg_bank_size != self.core.prg_rom.converter.bank_size_k {
+            println!(
+                "prg {} -> {}",
+                self.core.prg_rom.converter.bank_size_k, prg_bank_size
+            );
+        }
         self.core.prg_rom.converter.bank_size_k = prg_bank_size;
 
         let chr_bank_size = match self.chr_bank_mode() {
@@ -99,6 +112,12 @@ impl MMC1 {
             1 => 4,
             _ => unreachable!("Invalid chr bank mode {}", self.chr_bank_mode()),
         };
+        if chr_bank_size != self.core.chr_ram.converter.bank_size_k {
+            println!(
+                "chr {} -> {}",
+                self.core.chr_ram.converter.bank_size_k, chr_bank_size
+            );
+        }
         self.core.chr_ram.converter.bank_size_k = chr_bank_size;
     }
 

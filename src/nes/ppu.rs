@@ -45,6 +45,9 @@ const INITIAL_PALETTE_VALUES: [u8; PALETTE_SIZE] = [
  */
 #[allow(clippy::upper_case_acronyms)]
 pub struct PPU {
+    ppu_tick: usize,
+    last_status_read_tick: usize,
+
     ctrl_high_register: CtrlFlags,
     mask_register: MaskFlags,
     status_register: StatusFlags,
@@ -57,7 +60,7 @@ pub struct PPU {
 
     palettes: [u8; PALETTE_SIZE],
     scan_line: i16,
-    tick: u16,
+    dot: u16,
 
     even_frame: bool,
 
@@ -78,6 +81,9 @@ pub struct PPU {
 impl PPU {
     pub fn new() -> Self {
         Self {
+            ppu_tick: 0,
+            last_status_read_tick: 0,
+
             resetting: true,
             bus: Bus::new(),
             primary_oam: OAMData::new(),
@@ -88,7 +94,7 @@ impl PPU {
             status_register: StatusFlags::VerticalBlank | StatusFlags::SpriteOverflow,
             palettes: INITIAL_PALETTE_VALUES,
             scan_line: -1,
-            tick: 0,
+            dot: 0,
             even_frame: true,
             vram_address: VramAddress::new(),
             temporary_vram_address: VramAddress::new(),
@@ -132,7 +138,7 @@ impl PPU {
         self.ctrl_high_register = CtrlFlags::empty();
         self.mask_register = MaskFlags::empty();
         self.scan_line = -1;
-        self.tick = 0;
+        self.dot = 0;
         self.even_frame = true;
         self.write_toggle = false;
         self.vram_address = VramAddress::new();
@@ -164,14 +170,17 @@ impl PPU {
 
     fn manage_status(&mut self) {
         // manage status
-        match (self.scan_line, self.tick) {
+        match (self.scan_line, self.dot) {
             (-1, 1) => {
                 self.status_register = StatusFlags::empty(); // clear StatusFlag::VerticalBlank, StatusFlag::Sprite0Hit, and StatusFlag::SpriteOverflow
                 self.resetting = false; //
                 self.primary_oam.write_enabled = false;
             }
             (241, 1) => {
-                self.set_status_flag(StatusFlags::VerticalBlank, true);
+                // reading status at the same time as blank start, suppresses this flag
+                if self.ppu_tick != self.last_status_read_tick {
+                    self.set_status_flag(StatusFlags::VerticalBlank, true);
+                }
                 self.primary_oam.write_enabled = true;
             }
             _ => (),
@@ -181,7 +190,7 @@ impl PPU {
     #[allow(clippy::manual_range_contains)]
     fn manage_scrolling(&mut self) {
         // manage scrolling
-        match (self.scan_line, self.tick) {
+        match (self.scan_line, self.dot) {
             (_, t) if 1 <= t && t < 256 && t % 8 == 0 => self.vram_address.increment_coarse_x(),
             (_, 256) => {
                 self.vram_address.increment_coarse_x();
@@ -203,7 +212,7 @@ impl PPU {
             return;
         }
 
-        match self.tick {
+        match self.dot {
             0 => {
                 self.primary_oam.load_addr(0);
                 self.primary_oam.read_enabled = false;
@@ -340,16 +349,16 @@ impl PPU {
             }
             t if 258 <= t && t <= 340 => {}
 
-            _ => unreachable!("Unreachable tick number {}", self.tick),
+            _ => unreachable!("Unreachable dot number {}", self.dot),
         }
     }
 
     fn manage_shift_registers(&mut self) {
-        if self.tick > 0 {
-            match self.tick % 8 {
+        if self.dot > 0 {
+            match self.dot % 8 {
                 1 => {
                     self.bus_request = BusRequest::Read(self.vram_address.get_nametable_address());
-                    if self.tick >= 9 {
+                    if self.dot >= 9 {
                         self.bg_shift_registers.latch();
                     }
                 }
@@ -357,22 +366,22 @@ impl PPU {
                     .bg_shift_registers
                     .load_name_table_data(self.data_buffer),
 
-                3 if self.tick != 339 => {
+                3 if self.dot != 339 => {
                     self.bus_request = BusRequest::Read(self.vram_address.get_attribute_address())
                 }
-                4 if self.tick != 340 => self
+                4 if self.dot != 340 => self
                     .bg_shift_registers
                     .load_attribute_data(self.data_buffer, self.vram_address.get_attribute_shift()),
 
-                3 if self.tick == 339 => {
+                3 if self.dot == 339 => {
                     self.bus_request = BusRequest::Read(self.vram_address.get_nametable_address())
                 }
-                4 if self.tick == 340 => self
+                4 if self.dot == 340 => self
                     .bg_shift_registers
                     .load_name_table_data(self.data_buffer),
 
                 5 => {
-                    if 261 <= self.tick && self.tick <= 320 {
+                    if 261 <= self.dot && self.dot <= 320 {
                         if -1 <= self.scan_line && self.scan_line <= 239 {
                             self.bus_request =
                                 BusRequest::Read(self.compute_base_sprite_pattern_address());
@@ -386,7 +395,7 @@ impl PPU {
                     };
                 }
                 6 => {
-                    if 261 <= self.tick && self.tick <= 320 {
+                    if 261 <= self.dot && self.dot <= 320 {
                         if -1 <= self.scan_line && self.scan_line <= 239 {
                             self.sprite_row_data
                                 .current_sprite()
@@ -398,7 +407,7 @@ impl PPU {
                     }
                 }
                 7 => {
-                    if 261 <= self.tick && self.tick <= 320 {
+                    if 261 <= self.dot && self.dot <= 320 {
                         if -1 <= self.scan_line && self.scan_line <= 239 {
                             self.bus_request = BusRequest::Read(
                                 self.compute_base_sprite_pattern_address() | 0b00001000,
@@ -413,14 +422,14 @@ impl PPU {
                     };
                 }
                 0 => {
-                    if 261 <= self.tick && self.tick <= 320 {
+                    if 261 <= self.dot && self.dot <= 320 {
                         if -1 <= self.scan_line && self.scan_line <= 239 {
                             self.sprite_row_data
                                 .current_sprite()
                                 .set_pattern_high(self.data_buffer);
                             self.sprite_row_data.inc_sprite();
                         }
-                    } else if 0 < self.tick {
+                    } else if 0 < self.dot {
                         self.bg_shift_registers
                             .load_pattern_data_high(self.data_buffer);
                     }
@@ -429,10 +438,10 @@ impl PPU {
                 _ => (),
             }
 
-            if self.tick <= 336 {
+            if self.dot <= 336 {
                 self.bg_shift_registers.shift();
             }
-            if self.tick <= 256 {
+            if self.dot <= 256 {
                 self.sprite_row_data.shift();
             }
         }
@@ -451,7 +460,7 @@ impl PPU {
     }
 
     fn manage_render(&mut self) -> Option<PixelInfo> {
-        let x = self.tick;
+        let x = self.dot;
         let y = self.scan_line as u16;
 
         if x < 256 && y < 240 {
@@ -474,10 +483,6 @@ impl PPU {
                 }
             };
 
-            if bg_color != 0 && sprite_color != 0 && sprite0 {
-                self.status_register |= StatusFlags::Sprite0Hit;
-            }
-
             if !(self.read_mask_flag(MaskFlags::ShowBG)
                 && (x >= 8 || self.read_mask_flag(MaskFlags::ShowLeft8BG)))
             {
@@ -489,6 +494,10 @@ impl PPU {
             {
                 sprite_palette = 0b0100;
                 sprite_color = 0;
+            }
+
+            if bg_color != 0 && sprite_color != 0 && sprite0 && x != 255 {
+                self.status_register |= StatusFlags::Sprite0Hit;
             }
 
             let (palette_number, color) = match (bg_color, sprite_color, bg_priority) {
@@ -537,15 +546,14 @@ impl PPU {
     }
 
     fn manage_tick(&mut self) -> bool {
-        // skip a tick on odd frames when rendering is enabled
-        if self.scan_line == -1 && self.tick == 339 && !self.even_frame && self.rendering_enabled()
-        {
-            self.tick = 340;
+        // skip a dot on odd frames when rendering is enabled
+        if self.scan_line == -1 && self.dot == 339 && !self.even_frame && self.rendering_enabled() {
+            self.dot = 340;
         }
         let mut end_of_frame = false;
-        self.tick += 1;
-        if self.tick == 341 {
-            self.tick = 0;
+        self.dot += 1;
+        if self.dot == 341 {
+            self.dot = 0;
             self.scan_line += 1;
             if self.scan_line == 261 {
                 end_of_frame = true;
@@ -553,6 +561,7 @@ impl PPU {
                 self.even_frame = !self.even_frame;
             }
         }
+        self.ppu_tick += 1;
         end_of_frame
     }
 
@@ -654,6 +663,7 @@ impl BusDevice for PPU {
                 0x2000 => self.data_buffer,
                 0x2001 => self.data_buffer,
                 0x2002 => {
+                    self.last_status_read_tick = self.ppu_tick;
                     self.write_toggle = false;
                     let result = self.status_register.bits() | (self.data_buffer & 0x1F);
                     self.set_status_flag(StatusFlags::VerticalBlank, false);
@@ -757,12 +767,15 @@ impl BusDevice for PPU {
     }
 
     fn bus_clock(&mut self) -> InterruptFlags {
-        if !(self.read_status_flag(StatusFlags::VerticalBlank)
-            && self.read_ctrl_flag(CtrlFlags::NmiEnabled))
+        // NMI is edge detected from on to off. Only
+        // trigger the off condition when both
+        // these flags are true
+        if self.read_status_flag(StatusFlags::VerticalBlank)
+            && self.read_ctrl_flag(CtrlFlags::NmiEnabled)
         {
-            InterruptFlags::NMI
-        } else {
             InterruptFlags::empty()
+        } else {
+            InterruptFlags::NMI
         }
     }
 }

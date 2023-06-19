@@ -222,7 +222,7 @@ fn test_automatic_status() {
     let (mut ppu, _mem) = ppu::create_test_configuration();
 
     assert_eq!(-1, ppu.scan_line);
-    assert_eq!(0, ppu.tick);
+    assert_eq!(0, ppu.dot);
 
     ppu.set_ctrl_flag(CtrlFlags::NmiEnabled, true);
 
@@ -239,7 +239,7 @@ fn test_automatic_status() {
     assert_eq!(0, ppu.status_register.bits());
 
     ppu.scan_line = 241;
-    ppu.tick = 0;
+    ppu.dot = 0;
     assert!(!ppu.clock().0);
     assert_eq!(InterruptFlags::NMI, ppu.bus_clock());
     assert_eq!(0, ppu.status_register.bits());
@@ -252,7 +252,7 @@ fn test_automatic_status() {
     ppu.set_ctrl_flag(CtrlFlags::NmiEnabled, false);
     ppu.status_register = StatusFlags::empty();
     ppu.scan_line = 241;
-    ppu.tick = 0;
+    ppu.dot = 0;
     assert!(!ppu.clock().0);
     assert_eq!(InterruptFlags::NMI, ppu.bus_clock());
     assert_eq!(0, ppu.status_register.bits());
