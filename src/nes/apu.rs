@@ -243,11 +243,7 @@ impl APU {
                 22371 => {
                     self.clock_quarter_frame();
                 }
-                29829 => {
-                    self.clock_quarter_frame();
-                    self.clock_half_frame();
-                }
-                29830 => (), // "extra," do nothing
+                29829 => (), // "extra," do nothing
                 37281 => {
                     self.clock_quarter_frame();
                     self.clock_half_frame();
