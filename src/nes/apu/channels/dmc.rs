@@ -203,6 +203,7 @@ impl MemoryReader {
             }
             (DmcDmaState::Requested, CPUCycleType::Write, _) => (),
             (DmcDmaState::Getting, _, APUCycleType::Get) => {
+                println!("Reading {:#x}", self.current_address);
                 self.sample_buffer = cpu
                     .as_ref()
                     .borrow_mut()
@@ -216,11 +217,13 @@ impl MemoryReader {
             }
             (DmcDmaState::Getting, _, APUCycleType::Put) => (),
             (DmcDmaState::Putting, _, APUCycleType::Put) => {
+                println!("Writing {}", self.samples_remaining);
                 *sample = Some(self.sample_buffer);
                 self.samples_remaining -= 1;
                 if self.samples_remaining == 0 {
                     self.start = self.loop_enabled;
                     self.irq_occurred = self.irq_enabled;
+                    println!("IRQed = {}", self.irq_occurred);
                 }
                 cpu.as_ref().borrow_mut().set_rdy(true);
                 self.dma_state = DmcDmaState::NoDma;
@@ -247,11 +250,11 @@ impl MemoryReader {
     }
 
     fn read_sample_length_bits(&self) -> u8 {
-        ((self.sample_length.wrapping_sub(1)) >> 4) as u8
+        (self.sample_length >> 4) as u8
     }
 
     fn load_sample_addres_bits(&mut self, value: u8) {
-        self.sample_address = 0b1100000000000000 & ((value as u16) << 6);
+        self.sample_address = 0b1100000000000000 | ((value as u16) << 6);
     }
 
     fn read_sample_address_bits(&self) -> u8 {
