@@ -180,6 +180,10 @@ where
             if window.is_key_pressed(Key::R, KeyRepeat::No) {
                 nes.reset();
             }
+
+            if window.is_key_pressed(Key::R, KeyRepeat::No) {
+                nes.reset();
+            }
         }
     }
 

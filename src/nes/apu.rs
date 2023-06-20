@@ -189,13 +189,8 @@ impl APU {
     }
 
     fn manage_frame_counter(&mut self) {
-        match (self.frame_counter_reset_state, self.cycle_type) {
-            (FrameCounterResetState::WaitingForGetCycle, APUCycleType::Get) => {
-                self.frame_counter_reset_state = FrameCounterResetState::WaitingForPutCycle;
-                self.frame_counter += 1;
-            }
-
-            (FrameCounterResetState::WaitingForPutCycle, APUCycleType::Put) => {
+        match self.frame_counter_reset_state {
+            FrameCounterResetState::WaitingToReset(0) => {
                 self.frame_counter = 0;
                 if self
                     .frame_counter_control
@@ -205,6 +200,10 @@ impl APU {
                     self.clock_quarter_frame();
                 }
                 self.frame_counter_reset_state = FrameCounterResetState::None
+            }
+            FrameCounterResetState::WaitingToReset(n) => {
+                self.frame_counter_reset_state = FrameCounterResetState::WaitingToReset(n - 1);
+                self.frame_counter += 1;
             }
             _ => self.frame_counter += 1,
         }
@@ -419,7 +418,10 @@ impl BusDevice for APU {
                     {
                         self.set_frame_interrupt(false);
                     }
-                    self.frame_counter_reset_state = FrameCounterResetState::WaitingForGetCycle;
+                    self.frame_counter_reset_state = match self.cycle_type {
+                        APUCycleType::Get => FrameCounterResetState::WaitingToReset(2),
+                        APUCycleType::Put => FrameCounterResetState::WaitingToReset(3),
+                    };
                     old
                 }
                 _ => 0xFF,
@@ -475,8 +477,7 @@ bitflags::bitflags! {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum FrameCounterResetState {
     None,
-    WaitingForGetCycle,
-    WaitingForPutCycle,
+    WaitingToReset(u8),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
