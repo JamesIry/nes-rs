@@ -713,7 +713,10 @@ impl BusDevice for PPU {
                     old.bits()
                 }
                 0x2002 => 0,
-                0x2003 => self.primary_oam.load_addr(data),
+                0x2003 => {
+                    self.data_buffer = data;
+                    self.primary_oam.load_addr(data)
+                }
                 0x2004 => {
                     let old = self.primary_oam.write_data(data);
                     self.primary_oam.inc_addr();

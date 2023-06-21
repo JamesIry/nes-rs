@@ -36,7 +36,7 @@ fn test() {
         .borrow_mut()
         .add_device(Rc::new(RefCell::new(RAM::new(0x0000, 0x1FFF, 0x07FF))));
     //0x2000 - 0x3FFF  PPU Registers from 0x2000 to 0x2007 and then mirrored with mask 0x0007
-    cpu.as_ref().borrow_mut().add_device(ppu);
+    cpu.borrow_mut().add_device(ppu);
     //0x4000 - 0x4017  APU and IO registers
     //0x4018 - 0x401F  APU and IO functionality that is disabled
     cpu.as_ref()
@@ -47,17 +47,17 @@ fn test() {
         .borrow_mut()
         .add_device(Rc::new(RefCell::new(CartridgeCPUPort::new(cartridge))));
 
-    cpu.as_ref().borrow_mut().reset();
+    cpu.borrow_mut().reset();
 
-    cpu.as_ref().borrow_mut().monitor = Box::new(NestestMonitor::new());
-    cpu.as_ref().borrow_mut().reset_to(0xC000);
+    cpu.borrow_mut().monitor = Box::new(NestestMonitor::new());
+    cpu.borrow_mut().reset_to(0xC000);
 
     // now loop until trapped or halted
     while !cpu.borrow().stuck() && cpu.borrow().cycles <= 26560 {
-        cpu.as_ref().borrow_mut().clock();
+        cpu.borrow_mut().clock();
     }
 
-    let mut cpu = cpu.as_ref().borrow_mut();
+    let mut cpu = cpu.borrow_mut();
 
     assert_eq!(0, cpu.read_bus_byte(0x02));
     assert_eq!(0, cpu.read_bus_byte(0x03));

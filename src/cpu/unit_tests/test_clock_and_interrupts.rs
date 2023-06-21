@@ -18,7 +18,7 @@ fn test_reset() {
     let cycles = cpu.run_instruction();
     assert_eq!(7, cycles);
     assert_eq!(0x1234, cpu.pc);
-    assert_eq!(0xFD, cpu.sp);
+    assert_eq!(0xFA, cpu.sp);
 }
 
 #[test]
@@ -35,10 +35,10 @@ fn test_nmi() {
     cpu.reset();
     cpu.run_instruction();
 
-    interruptor.as_ref().borrow_mut().flags = InterruptFlags::NMI;
+    interruptor.borrow_mut().flags = InterruptFlags::NMI;
     cpu.clock_bus();
     cpu.poll_interrupts();
-    interruptor.as_ref().borrow_mut().flags = InterruptFlags::empty();
+    interruptor.borrow_mut().flags = InterruptFlags::empty();
     cpu.clock_bus();
     cpu.poll_interrupts();
     let cycles = cpu.run_instruction();
@@ -70,7 +70,7 @@ fn test_irq() {
     cpu.run_instruction(); // run the reset
     cpu.run_instruction(); // SEI
     assert!(cpu.read_flag(StatusFlags::InterruptDisable));
-    interruptor.as_ref().borrow_mut().flags = InterruptFlags::IRQ; // should be masked
+    interruptor.borrow_mut().flags = InterruptFlags::IRQ; // should be masked
     cpu.run_instruction(); // CLI
     assert_eq!(0x1236, cpu.pc);
     assert!(!cpu.read_flag(StatusFlags::InterruptDisable));

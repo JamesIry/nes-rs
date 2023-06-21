@@ -20,7 +20,7 @@ impl Bus {
     }
 
     pub fn add_device(&mut self, device: Rc<RefCell<dyn BusDevice>>) {
-        let addr_range = device.as_ref().borrow_mut().get_address_range();
+        let addr_range = device.borrow_mut().get_address_range();
         self.bus_devices.push((addr_range, device));
     }
 

@@ -12,8 +12,8 @@ fn functional_test() {
     // load the bin file into ram
     let file = File::open("resources/test/6502_functional_test.bin").unwrap();
     let mut reader = BufReader::new(file);
-    mem.as_ref().borrow_mut().raw().truncate(0);
-    reader.read_to_end(mem.as_ref().borrow_mut().raw()).unwrap();
+    mem.borrow_mut().raw().truncate(0);
+    reader.read_to_end(mem.borrow_mut().raw()).unwrap();
 
     // cpu.monitor = Box::new(cpu::monitor::LoggingMonitor::new());
 

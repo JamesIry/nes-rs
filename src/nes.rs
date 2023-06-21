@@ -46,10 +46,10 @@ impl NES {
             .borrow_mut()
             .add_device(Rc::new(RefCell::new(RAM::new(0x0000, 0x1FFF, 0x07FF))));
         //0x2000 - 0x3FFF  PPU Registers from 0x2000 to 0x2007 and then mirrored with mask 0x0007
-        cpu.as_ref().borrow_mut().add_device(ppu.clone());
+        cpu.borrow_mut().add_device(ppu.clone());
         //0x4000 - 0x4017  APU and IO registers
         //0x4018 - 0x401F  APU and IO functionality that is disabled
-        cpu.as_ref().borrow_mut().add_device(apu.clone());
+        cpu.borrow_mut().add_device(apu.clone());
         //0x4020 - 0xFFFF  Cartridge space
         let cartridge_cpu_port = Rc::new(RefCell::new(CartridgeCPUPort::new(cartridge.clone())));
         cpu.as_ref()
@@ -79,9 +79,9 @@ impl NES {
     }
 
     pub fn reset(&mut self) {
-        self.cpu.as_ref().borrow_mut().reset();
-        self.apu.as_ref().borrow_mut().reset();
-        self.ppu.as_ref().borrow_mut().reset();
+        self.cpu.borrow_mut().reset();
+        self.apu.borrow_mut().reset();
+        self.ppu.borrow_mut().reset();
         self.tick = 0;
     }
 
@@ -92,16 +92,16 @@ impl NES {
                 let input1 = self.controller1.borrow().read_value();
                 let input2 = self.controller2.borrow().read_value();
 
-                let mut apu_borrowed = self.apu.as_ref().borrow_mut();
+                let mut apu_borrowed = self.apu.borrow_mut();
                 apu_borrowed.set_input_port1(input1);
                 apu_borrowed.set_input_port2(input2);
                 let sample = apu_borrowed.clock(self.last_cycle_type);
                 audio_sample = Some(sample);
             };
-            self.last_cycle_type = self.cpu.as_ref().borrow_mut().clock();
+            self.last_cycle_type = self.cpu.borrow_mut().clock();
         }
 
-        let (end_of_frame, pixelinfo) = self.ppu.as_ref().borrow_mut().clock();
+        let (end_of_frame, pixelinfo) = self.ppu.borrow_mut().clock();
 
         self.tick += 1;
         if self.tick == 3 {

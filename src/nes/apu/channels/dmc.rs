@@ -157,7 +157,7 @@ pub struct MemoryReader {
     sample_length: u16,
     start: bool,
     dma_state: DmcDmaState,
-    sample_buffer: u8,
+    marked_not_ready: bool,
 }
 impl MemoryReader {
     fn new() -> Self {
@@ -171,7 +171,7 @@ impl MemoryReader {
             sample_length: 1,
             start: false,
             dma_state: DmcDmaState::NoDma,
-            sample_buffer: 0,
+            marked_not_ready: false,
         }
     }
 
@@ -192,19 +192,21 @@ impl MemoryReader {
             && cpu_cycle_type == CPUCycleType::Read
             && self.dma_state == DmcDmaState::NoDma
         {
-            self.dma_state = DmcDmaState::Requested;
-        }
-
+            self.dma_state = if cpu.borrow().is_rdy() {
+                DmcDmaState::Requested
+            } else {
+                DmcDmaState::Executing
+            }
+        };
         match (self.dma_state, cpu_cycle_type, apu_cycle_type) {
             (DmcDmaState::NoDma, _, _) => (),
             (DmcDmaState::Requested, CPUCycleType::Read, _) => {
-                cpu.as_ref().borrow_mut().set_rdy(false);
-                self.dma_state = DmcDmaState::Getting;
+                cpu.borrow_mut().set_rdy(false);
+                self.marked_not_ready = true;
+                self.dma_state = DmcDmaState::Executing;
             }
-            (DmcDmaState::Requested, CPUCycleType::Write, _) => (),
-            (DmcDmaState::Getting, _, APUCycleType::Get) => {
-                println!("Reading {:#x}", self.current_address);
-                self.sample_buffer = cpu
+            (DmcDmaState::Executing, _, APUCycleType::Put) => {
+                let sample_buffer = cpu
                     .as_ref()
                     .borrow_mut()
                     .read_bus_byte(self.current_address);
@@ -213,22 +215,21 @@ impl MemoryReader {
                 } else {
                     self.current_address += 1;
                 }
-                self.dma_state = DmcDmaState::Putting;
-            }
-            (DmcDmaState::Getting, _, APUCycleType::Put) => (),
-            (DmcDmaState::Putting, _, APUCycleType::Put) => {
-                println!("Writing {}", self.samples_remaining);
-                *sample = Some(self.sample_buffer);
+                *sample = Some(sample_buffer);
                 self.samples_remaining -= 1;
                 if self.samples_remaining == 0 {
                     self.start = self.loop_enabled;
-                    self.irq_occurred = self.irq_enabled;
-                    println!("IRQed = {}", self.irq_occurred);
+                    if !self.loop_enabled {
+                        self.irq_occurred = self.irq_enabled;
+                    }
                 }
-                cpu.as_ref().borrow_mut().set_rdy(true);
+                if self.marked_not_ready {
+                    cpu.borrow_mut().set_rdy(true);
+                    self.marked_not_ready = false;
+                }
                 self.dma_state = DmcDmaState::NoDma;
             }
-            (DmcDmaState::Putting, _, APUCycleType::Get) => unreachable!("Extra DMC read"),
+            _ => (),
         }
     }
 
@@ -266,6 +267,5 @@ impl MemoryReader {
 enum DmcDmaState {
     NoDma,
     Requested,
-    Getting,
-    Putting,
+    Executing,
 }

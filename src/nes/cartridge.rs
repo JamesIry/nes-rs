@@ -87,9 +87,12 @@ impl Cartridge {
             nes_header.chr_is_rom,
         );
 
+        // vram goes all the way to 0x3FFF even though palette ram occupies
+        // 0x3F00-0x3FFF. That's because the PPU 'shadow' reads
+        // vram even when reading palettes
         let vram_vec = vec![0; VRAM_SIZE];
         let vram =
-            MemoryRegion::new_vram(vram_vec, 0x2000, 0x3EFF, 1, false, nes_header.mirror_type);
+            MemoryRegion::new_vram(vram_vec, 0x2000, 0x3FFF, 1, false, nes_header.mirror_type);
 
         let mapper_number = nes_header.mapper_number;
 
@@ -339,7 +342,7 @@ impl BusDevice for CartridgeCPUPort {
     }
 
     fn bus_clock(&mut self) -> InterruptFlags {
-        self.cartridge.as_ref().borrow_mut().cpu_bus_clock()
+        self.cartridge.borrow_mut().cpu_bus_clock()
     }
 }
 
@@ -367,7 +370,7 @@ impl BusDevice for CartridgePPUPort {
     }
 
     fn bus_clock(&mut self) -> crate::bus::InterruptFlags {
-        self.cartridge.as_ref().borrow_mut().ppu_bus_clock();
+        self.cartridge.borrow_mut().ppu_bus_clock();
         InterruptFlags::empty()
     }
 }

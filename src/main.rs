@@ -59,28 +59,6 @@ fn run<T>(audio_device: &Device, stream_config: &StreamConfig) -> Result<()>
 where
     T: FromSample<i16> + SizedSample,
 {
-    let mut muted = false;
-    // be sure  there's enough space in the shared queue for 2 frame's worth of samples
-    let buff_size = (stream_config.sample_rate.0 / 60 * 2 + 1) as usize;
-    let (sender, receiver) = bounded::<i16>(buff_size);
-    let mut next_value = move || receiver.recv().unwrap_or(0);
-
-    let err_callback = |err| eprintln!("an error occurred on stream: {}", err);
-    let channels = stream_config.channels as usize;
-    let data_callback = move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-        write_data(data, channels, &mut next_value)
-    };
-
-    let stream =
-        audio_device.build_output_stream(stream_config, data_callback, err_callback, None)?;
-    stream.play()?;
-
-    let mut blip = BlipBuf::new(buff_size as u32);
-    let mut blip_buffer = [0; BLIP_BUFF_SIZE];
-    blip.set_rates(PPU_CLOCK_SPEED as f64, stream_config.sample_rate.0 as f64);
-
-    let mut screen_buffer = vec![0; NES_WIDTH * NES_HEIGHT];
-
     let args = env::args().collect::<Vec<String>>();
     let cartridge_name = if args.len() > 1 {
         &args[1]
@@ -99,6 +77,7 @@ where
         none: false,
     };
 
+    let mut screen_buffer = vec![0; NES_WIDTH * NES_HEIGHT];
     let mut window = Window::new("NES RS", SCREEN_WIDTH, SCREEN_HEIGHT, opts)?;
 
     let mut nes = NES::new();
@@ -108,6 +87,26 @@ where
 
     nes.reset();
 
+    // be sure  there's enough space in the shared queue for 2 frame's worth of samples
+    let audio_buff_size = (stream_config.sample_rate.0 / 60 * 2 + 1) as usize;
+
+    let mut blip = BlipBuf::new(audio_buff_size as u32);
+    let mut blip_buffer = [0; BLIP_BUFF_SIZE];
+    blip.set_rates(PPU_CLOCK_SPEED as f64, stream_config.sample_rate.0 as f64);
+
+    let (sender, receiver) = bounded::<i16>(audio_buff_size);
+    let err_callback = |err| eprintln!("an error occurred on stream: {}", err);
+    let channels = stream_config.channels as usize;
+    let mut next_value = move || receiver.recv().unwrap_or(0);
+    let data_callback = move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+        write_data(data, channels, &mut next_value)
+    };
+
+    let stream =
+        audio_device.build_output_stream(stream_config, data_callback, err_callback, None)?;
+    stream.play()?;
+
+    let mut muted = false;
     let start = Instant::now();
     let mut frame = 0.0;
     let mut last_sample = 0;

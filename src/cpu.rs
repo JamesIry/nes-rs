@@ -171,6 +171,10 @@ impl CPU {
         } else {
             let (cycle_type, instruction_complete) = if self.remaining_cycles > 0 {
                 let instruction_complete = if self.remaining_cycles == 1 {
+                    if self.mode == Mode::Imp {
+                        // no arg operations get an extra dummy read
+                        self.read_bus_byte(self.pc);
+                    }
                     let (page_boundary, branch_taken) = self.execute(self.instruction, self.mode);
                     if page_boundary == PageBoundary::Crossed && self.cycle_on_page_boundary {
                         self.extra_cycles += 1;
@@ -244,7 +248,6 @@ impl CPU {
         self.rdy = rdy;
     }
 
-    #[cfg(test)]
     pub fn is_rdy(&self) -> bool {
         self.rdy
     }
@@ -256,7 +259,7 @@ impl CPU {
 
     fn interrupt(&mut self, interrupt: Interrupt) -> (PageBoundary, Branch) {
         if interrupt == Interrupt::RST {
-            self.sp = 0xFD; // reset doesn't push onto the stack, but simulates it
+            self.sp = self.sp.wrapping_sub(3); // reset doesn't push onto the stack, but simulates it
         } else {
             self.push_word(
                 self.pc
@@ -409,6 +412,7 @@ impl CPU {
         let location = self.get_location(mode);
 
         let m = self.read_value(location);
+        self.write_value(location, m.0); // dummy write
 
         self.write_value(
             location,
@@ -426,6 +430,7 @@ impl CPU {
     fn shift_right(&mut self, shift_style: ShiftStyle, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
         let m = self.read_value(location);
+        self.write_value(location, m.0); // dummy write
 
         self.write_value(
             location,
@@ -451,6 +456,7 @@ impl CPU {
         let location = self.get_location(mode);
 
         let m = self.read_value(location);
+        self.write_value(location, m.0); // dummy write
 
         self.write_value(location, f(m.0));
         (m.1, Branch::NotTaken)
@@ -597,7 +603,7 @@ impl CPU {
             self.push_word(self.pc.wrapping_sub(1));
         }
 
-        if let Location::Addr(_, addr) = location {
+        if let Location::Addr(_, addr, _) = location {
             if condition {
                 // a jmp back to itself is the most common form of
                 // trap used in tests. Another common one is a conditional
@@ -640,7 +646,10 @@ impl CPU {
             Location::Y => self.y,
             Location::SP => self.sp,
             Location::Status => self.status.bits(),
-            Location::Addr(_, addr) => {
+            Location::Addr(_, addr, dummy_addr) => {
+                if dummy_addr != addr {
+                    self.read_bus_byte(dummy_addr);
+                }
                 let value = self.read_bus_byte(addr);
                 self.monitor.read_data_byte(addr, value).unwrap();
                 value
@@ -671,7 +680,10 @@ impl CPU {
             Location::Y => self.y = value,
             Location::SP => self.sp = value,
             Location::Status => self.status = StatusFlags::from_bits_truncate(value),
-            Location::Addr(_, addr) => {
+            Location::Addr(_, addr, dummy_addr) => {
+                if dummy_addr != addr {
+                    self.read_bus_byte(dummy_addr);
+                }
                 let old = self.write_bus_byte(addr, value);
                 self.monitor.read_data_byte(addr, old).unwrap();
             }
@@ -695,21 +707,30 @@ impl CPU {
         self.status.contains(flag)
     }
 
+    fn calc_addr(addr: u16, addition: u8) -> Location {
+        let (low, high) = CPU::bytes(addr);
+        let new_low = low.wrapping_add(addition);
+        let unfixed = ((high as u16) << 8) | new_low as u16;
+        Location::Addr(addr, addr.wrapping_add(addition as u16), unfixed)
+    }
+
+    fn simple_addr(addr: u16) -> Location {
+        Location::Addr(addr, addr, addr)
+    }
+
     fn get_location(&mut self, mode: Mode) -> Location {
         match mode {
             Mode::Abs => {
                 let addr = self.fetch_word();
-                Location::Addr(addr, addr)
+                CPU::simple_addr(addr)
             }
             Mode::AbsX => {
                 let orig_addr = self.fetch_word();
-                let addr = orig_addr.wrapping_add(self.x as u16);
-                Location::Addr(orig_addr, addr)
+                CPU::calc_addr(orig_addr, self.x)
             }
             Mode::AbsY => {
                 let orig_addr = self.fetch_word();
-                let addr = orig_addr.wrapping_add(self.y as u16);
-                Location::Addr(orig_addr, addr)
+                CPU::calc_addr(orig_addr, self.y)
             }
             Mode::Status => Location::Status,
             Mode::A => Location::A,
@@ -720,42 +741,39 @@ impl CPU {
             Mode::Imp => Location::Imp,
             Mode::AbsInd => {
                 let orig_addr = self.fetch_word();
-                let lb = self.read_value(Location::Addr(orig_addr, orig_addr)).0;
+                let lb = self
+                    .read_value(Location::Addr(orig_addr, orig_addr, orig_addr))
+                    .0;
                 // the 6502 has a bug where instead of incrementing the full address before
                 // reading the the next byte, it only increments the low byte of the address.
                 // Weird? yes. Hence never "JMP ($xxFF)" because what happens will be weird as it
                 // will read the address from $xxFF and then $xx00
                 let addr_high = CPU::high_byte(orig_addr);
                 let addr_low = CPU::low_byte(orig_addr).wrapping_add(1);
-                let hb = self
-                    .read_value(Location::Addr(
-                        CPU::to_word(addr_low, addr_high),
-                        CPU::to_word(addr_low, addr_high),
-                    ))
-                    .0;
+                let hb_addr = CPU::to_word(addr_low, addr_high);
+                let hb = self.read_value(CPU::simple_addr(hb_addr)).0;
                 let addr = CPU::to_word(lb, hb);
-                Location::Addr(orig_addr, addr)
+                Location::Addr(orig_addr, addr, addr)
             }
             Mode::IndX => {
                 let zp_addr_low = self.fetch_byte().wrapping_add(self.x) as u16;
                 let zp_addr_high = (zp_addr_low as u8).wrapping_add(1) as u16;
-                let addr_low = self.read_value(Location::Addr(zp_addr_low, zp_addr_low)).0;
-                let addr_high = self
-                    .read_value(Location::Addr(zp_addr_high, zp_addr_high))
-                    .0;
+                let addr_low = self.read_value(CPU::simple_addr(zp_addr_low)).0;
+                let addr_high = self.read_value(CPU::simple_addr(zp_addr_high)).0;
                 let addr = CPU::to_word(addr_low, addr_high);
-                Location::Addr(addr, addr)
+                CPU::simple_addr(addr)
             }
             Mode::IndY => {
                 let zp_addr_low = self.fetch_byte() as u16;
                 let zp_addr_high = (zp_addr_low as u8).wrapping_add(1) as u16;
-                let orig_addr_low = self.read_value(Location::Addr(zp_addr_low, zp_addr_low)).0;
+                let orig_addr_low = self
+                    .read_value(Location::Addr(zp_addr_low, zp_addr_low, zp_addr_low))
+                    .0;
                 let orig_addr_high = self
-                    .read_value(Location::Addr(zp_addr_high, zp_addr_high))
+                    .read_value(Location::Addr(zp_addr_high, zp_addr_high, zp_addr_high))
                     .0;
                 let orig_addr = CPU::to_word(orig_addr_low, orig_addr_high);
-                let addr = orig_addr.wrapping_add(self.y as u16);
-                Location::Addr(orig_addr, addr)
+                CPU::calc_addr(orig_addr, self.y)
             }
             Mode::Rel => {
                 let offset = self.fetch_byte();
@@ -766,20 +784,20 @@ impl CPU {
                     self.pc.wrapping_add(offset as u16)
                 };
 
-                Location::Addr(self.pc, new_pc)
+                Location::Addr(self.pc, new_pc, new_pc)
             }
 
             Mode::Zp => {
                 let addr = self.fetch_byte() as u16;
-                Location::Addr(addr, addr)
+                CPU::simple_addr(addr)
             }
             Mode::Zpx => {
                 let addr = (self.fetch_byte().wrapping_add(self.x)) as u16;
-                Location::Addr(addr, addr)
+                CPU::simple_addr(addr)
             }
             Mode::Zpy => {
                 let addr = (self.fetch_byte().wrapping_add(self.y)) as u16;
-                Location::Addr(addr, addr)
+                CPU::simple_addr(addr)
             }
         }
     }
@@ -804,6 +822,10 @@ impl CPU {
 
     fn high_byte(value: u16) -> u8 {
         (value >> 8) as u8
+    }
+
+    fn bytes(value: u16) -> (u8, u8) {
+        (CPU::low_byte(value), CPU::high_byte(value))
     }
 
     fn to_word(low_byte: u8, high_byte: u8) -> u16 {
@@ -883,7 +905,7 @@ impl CPU {
             Location::Y => (),
             Location::SP => (),
             Location::Status => (),
-            Location::Addr(_, _) => {
+            Location::Addr(_, _, _) => {
                 self.read_value(location);
             }
             Location::Imm => {
@@ -943,7 +965,9 @@ impl CPU {
 
     fn dcp(&mut self, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
-        let value = self.read_value(location).0.wrapping_sub(1);
+        let orig = self.read_value(location).0;
+        self.write_value(location, orig); // dummy write
+        let value = orig.wrapping_sub(1);
 
         let diff = self.a.wrapping_sub(value);
 
@@ -959,7 +983,9 @@ impl CPU {
 
     fn isc(&mut self, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
-        let m = self.read_value(location).0.wrapping_add(1);
+        let orig = self.read_value(location).0;
+        self.write_value(location, orig); // dummy write
+        let m = orig.wrapping_add(1);
 
         let borrow = if self.read_flag(StatusFlags::Carry) {
             0
@@ -1030,7 +1056,7 @@ impl CPU {
 
     fn h_plus_1(location: Location) -> u8 {
         match location {
-            Location::Addr(orig, _) => ((orig >> 8) as u8).wrapping_add(1),
+            Location::Addr(orig, _, _) => ((orig >> 8) as u8).wrapping_add(1),
             _ => unreachable!("SHA, SHX, SHY, or TAS with invalid location {:?}", location),
         }
     }
@@ -1038,6 +1064,7 @@ impl CPU {
     fn rla(&mut self, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
         let orig = self.read_value(location).0;
+        self.write_value(location, orig); // dummy write
         let m = (orig << 1)
             | if self.read_flag(StatusFlags::Carry) {
                 1
@@ -1056,6 +1083,7 @@ impl CPU {
     fn rra(&mut self, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
         let orig = self.read_value(location).0;
+        self.write_value(location, orig); // dummy write
         let m = (orig >> 1)
             | if self.read_flag(StatusFlags::Carry) {
                 SIGN_BIT
@@ -1128,6 +1156,7 @@ impl CPU {
     fn slo(&mut self, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
         let orig = self.read_value(location).0;
+        self.write_value(location, orig); // dummy write
         let m = orig << 1;
 
         self.write_value_without_flags(location, m);
@@ -1139,6 +1168,7 @@ impl CPU {
     fn sre(&mut self, mode: Mode) -> (PageBoundary, Branch) {
         let location = self.get_location(mode);
         let orig = self.read_value(location).0;
+        self.write_value(location, orig); // dummy write
         let m = orig >> 1;
 
         self.write_value_without_flags(location, m);
@@ -1169,7 +1199,7 @@ enum Location {
     Y,
     SP,
     Status,
-    Addr(u16, u16),
+    Addr(u16, u16, u16),
     Imm,
     Imp,
 }
@@ -1182,7 +1212,7 @@ impl Location {
             Location::Y => PageBoundary::NotCrossed,
             Location::SP => PageBoundary::NotCrossed,
             Location::Status => PageBoundary::NotCrossed,
-            Location::Addr(addr1, addr2) => {
+            Location::Addr(addr1, addr2, _) => {
                 if (addr1 & HIGH_BYTE_MASK) != (addr2 & HIGH_BYTE_MASK) {
                     PageBoundary::Crossed
                 } else {

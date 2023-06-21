@@ -164,7 +164,7 @@ impl APU {
         match (self.oam_dma_state, cpu_cycle_type, self.cycle_type) {
             (OamDmaState::NoDma, _, _) => (),
             (OamDmaState::Requested, CPUCycleType::Read, _) => {
-                self.cpu.as_ref().borrow_mut().set_rdy(false);
+                self.cpu.borrow_mut().set_rdy(false);
                 self.oam_dma_state = OamDmaState::Ready;
             }
             (OamDmaState::Requested, CPUCycleType::Write, _) => (),
@@ -179,7 +179,7 @@ impl APU {
             (OamDmaState::Executing(offset), _, APUCycleType::Put) => {
                 self.write_oam_dma();
                 if offset == 255 {
-                    self.cpu.as_ref().borrow_mut().set_rdy(true);
+                    self.cpu.borrow_mut().set_rdy(true);
                     self.oam_dma_state = OamDmaState::NoDma;
                 } else {
                     self.oam_dma_state = OamDmaState::Executing(offset + 1);
@@ -278,7 +278,7 @@ impl APU {
 
     fn read_oam_dma(&mut self, offset: u16) {
         let addr = ((self.oam_dma_page as u16) << 8) | offset;
-        self.oam_dma_data = self.cpu.as_ref().borrow_mut().read_bus_byte(addr);
+        self.oam_dma_data = self.cpu.borrow_mut().read_bus_byte(addr);
     }
 
     fn write_oam_dma(&self) {
@@ -396,8 +396,7 @@ impl BusDevice for APU {
                     {
                         self.resetting_state = ResettingState::CountingDown(2048);
                     }
-                    self.sound_enable_register_high
-                        .set(SoundEnableFlags::DMCInterrupt, false);
+                    self.dmc_channel.memory_reader.irq_occurred = false;
                     0xFF // this is just to make nestest.rs happy
                 }
                 0x4016 => {
