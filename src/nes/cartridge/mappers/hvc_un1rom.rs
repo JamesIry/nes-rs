@@ -1,6 +1,6 @@
 use crate::{
     bus::InterruptFlags,
-    nes::cartridge::{address_converters::AddressConverter, CartridgeCore, Mapper},
+    nes::cartridge::{CartridgeCore, Mapper},
 };
 
 /**
@@ -12,13 +12,15 @@ pub struct HvcUN1Rom {
 
 impl HvcUN1Rom {
     pub fn new(mut core: CartridgeCore) -> Self {
-        core.prg_rom.converter.bank_size_k = 16;
+        core.prg_rom.set_bank_size_k(16);
         Self { core }
     }
 
     fn configure(&mut self, _addr: u16, value: u8) -> u8 {
-        let old = self.core.prg_rom.converter.bank >> 2;
-        self.core.prg_rom.converter.bank = (value & 0b00011100) << 2;
+        let old = (self.core.prg_rom.get_bank(0) as u8) >> 2;
+        self.core
+            .prg_rom
+            .set_bank(0, ((value & 0b00011100) << 2) as i16);
         old
     }
 }
@@ -28,7 +30,7 @@ impl Mapper for HvcUN1Rom {
         self.core.read_cpu(addr)
     }
     fn write_cpu(&mut self, addr: u16, value: u8) -> u8 {
-        if self.core.prg_rom.converter.contains_addr(addr) {
+        if self.core.prg_rom.contains_addr(addr) {
             self.configure(addr, value)
         } else {
             self.core.write_cpu(addr, value)

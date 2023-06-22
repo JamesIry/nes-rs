@@ -1,6 +1,6 @@
 use crate::{
     bus::InterruptFlags,
-    nes::cartridge::{address_converters::AddressConverter, CartridgeCore, Mapper, MirrorType},
+    nes::cartridge::{CartridgeCore, Mapper, MirrorType},
 };
 
 /**
@@ -25,7 +25,7 @@ pub struct MMC1 {
 
 impl MMC1 {
     pub fn new(mut core: CartridgeCore, force_sram_enable: bool) -> Self {
-        core.sram.converter.bank_size_k = 8;
+        core.sram.set_bank_size_k(8);
         let mut result = Self {
             core,
 
@@ -86,39 +86,44 @@ impl MMC1 {
             3 => MirrorType::Horizontal,
             _ => unreachable!("Invalid mirror mode {}", self.mirror_mode()),
         };
-        if mirror_type != self.core.vram.converter.mirror_type {
-            println!(
-                "mirror {:?} -> {:?}",
-                self.core.vram.converter.mirror_type, mirror_type
-            );
-        }
-        self.core.vram.converter.mirror_type = mirror_type;
+        self.core.vram.set_mirror_type(mirror_type);
 
-        let prg_bank_size = match self.prg_bank_mode() {
-            0..=1 => 32,
-            2..=3 => 16,
+        match self.prg_bank_mode() {
+            0..=1 => {
+                self.core.prg_rom.set_bank_size_k(32);
+                self.core
+                    .prg_rom
+                    .set_bank(0, (self.prg_bank_reg >> 1) as i16);
+            }
+            2 => {
+                self.core.prg_rom.set_bank_size_k(16);
+                self.core.prg_rom.set_bank(0, 0);
+                self.core.prg_rom.set_bank(1, self.prg_bank_reg as i16);
+            }
+            3 => {
+                self.core.prg_rom.set_bank_size_k(16);
+                self.core.prg_rom.set_bank(0, self.prg_bank_reg as i16);
+                self.core.prg_rom.set_bank(1, -1);
+            }
             _ => unreachable!("Invalid prg bank mode {}", self.prg_bank_mode()),
         };
-        if prg_bank_size != self.core.prg_rom.converter.bank_size_k {
-            println!(
-                "prg {} -> {}",
-                self.core.prg_rom.converter.bank_size_k, prg_bank_size
-            );
-        }
-        self.core.prg_rom.converter.bank_size_k = prg_bank_size;
 
-        let chr_bank_size = match self.chr_bank_mode() {
-            0 => 8,
-            1 => 4,
+        match self.chr_bank_mode() {
+            0 => {
+                self.core.chr_ram.set_bank_size_k(8);
+                self.core
+                    .chr_ram
+                    .set_bank(0, (self.chr_bank_0_reg >> 1) as i16);
+            }
+            1 => {
+                self.core.chr_ram.set_bank_size_k(4);
+                self.core.chr_ram.set_bank(0, self.chr_bank_0_reg as i16);
+                self.core.chr_ram.set_bank(1, self.chr_bank_1_reg as i16);
+            }
             _ => unreachable!("Invalid chr bank mode {}", self.chr_bank_mode()),
         };
-        if chr_bank_size != self.core.chr_ram.converter.bank_size_k {
-            println!(
-                "chr {} -> {}",
-                self.core.chr_ram.converter.bank_size_k, chr_bank_size
-            );
-        }
-        self.core.chr_ram.converter.bank_size_k = chr_bank_size;
+
+        self.core.sram.set_bank(0, self.sram_bank_reg as i16);
     }
 
     fn mirror_mode(&self) -> u8 {
@@ -133,37 +138,8 @@ impl MMC1 {
         self.control_reg & 0b00010000 >> 4
     }
 
-    fn prg_bank(&self, addr: u16) -> i16 {
-        match (self.prg_bank_mode(), addr) {
-            (0..=1, _) => (self.prg_bank_reg >> 1) as i16,
-            (2, 0x8000..=0xBFFF) => 0,
-            (2, 0xC000..=0xFFFF) => self.prg_bank_reg as i16,
-            (3, 0x8000..=0xBFFF) => self.prg_bank_reg as i16,
-            (3, 0xC000..=0xFFFF) => -1,
-            _ => unreachable!(
-                "Invalid prg bank mode or address {} {}",
-                self.prg_bank_mode(),
-                addr
-            ),
-        }
-    }
-
-    fn chr_bank(&self, addr: u16) -> i16 {
-        let bank = match (self.chr_bank_mode(), addr) {
-            (0, _) => self.chr_bank_0_reg >> 1,
-            (1, 0x0000..=0x0FFF) => self.chr_bank_0_reg,
-            (1, 0x1000..=0x1FFF) => self.chr_bank_1_reg,
-            _ => unreachable!(
-                "Invalid chr bank mode or address {} {}",
-                self.chr_bank_mode(),
-                addr
-            ),
-        };
-        bank as i16
-    }
-
     fn set_chr_reg(&mut self, reg: u8, value: u8) {
-        let chr_ram_size = self.core.chr_ram.converter.max_size / 1024;
+        let chr_ram_size = self.core.chr_ram.get_memory_size_k();
 
         let chr_bank_mask = match chr_ram_size {
             128.. => 0b00011111,
@@ -171,7 +147,6 @@ impl MMC1 {
             32..=63 => 0b0000111,
             16..=31 => 0b0000011,
             ..=15 => 0b00000001,
-            _ => unreachable!(),
         };
 
         if reg == 0 {
@@ -180,14 +155,14 @@ impl MMC1 {
             self.chr_bank_1_reg = value & chr_bank_mask;
         }
 
-        let sram_size = self.core.sram.converter.max_size / 1024;
+        let sram_size = self.core.sram.get_memory_size_k();
         if sram_size == 16 {
             self.sram_bank_reg = value >> 3 & 0b00000001;
         } else {
             self.sram_bank_reg = value >> 2 & 0b00000011;
         }
 
-        let prg_rom_size = self.core.prg_rom.converter.max_size / 1024;
+        let prg_rom_size = self.core.prg_rom.get_memory_size_k();
         if prg_rom_size == 512 {
             self.prg_bank_reg = (self.prg_bank_reg & 0b00001111) | (value & 0b00010000)
         }
@@ -203,31 +178,24 @@ impl MMC1 {
 
 impl Mapper for MMC1 {
     fn read_cpu(&mut self, addr: u16) -> u8 {
-        if self.core.sram.converter.contains_addr(addr) {
+        if self.core.sram.contains_addr(addr) {
             if self.sram_disabled {
                 0
             } else {
-                self.core
-                    .sram
-                    .read_from_bank(self.sram_bank_reg as i16, addr)
+                self.core.sram.read(addr)
             }
-        } else if self.core.prg_rom.converter.contains_addr(addr) {
-            let bank = self.prg_bank(addr);
-            self.core.prg_rom.read_from_bank(bank, addr)
         } else {
             self.core.read_cpu(addr)
         }
     }
     fn write_cpu(&mut self, addr: u16, value: u8) -> u8 {
-        if self.core.sram.converter.contains_addr(addr) {
+        if self.core.sram.contains_addr(addr) {
             if self.sram_disabled {
                 0
             } else {
-                self.core
-                    .sram
-                    .write_to_bank(self.sram_bank_reg as i16, addr, value)
+                self.core.sram.write(addr, value)
             }
-        } else if self.core.prg_rom.converter.contains_addr(addr) {
+        } else if self.core.prg_rom.contains_addr(addr) {
             self.configure(addr, value)
         } else {
             self.core.write_cpu(addr, value)
@@ -235,21 +203,11 @@ impl Mapper for MMC1 {
     }
 
     fn read_ppu(&mut self, addr: u16) -> u8 {
-        if self.core.chr_ram.converter.contains_addr(addr) {
-            let bank = self.chr_bank(addr);
-            self.core.chr_ram.read_from_bank(bank, addr)
-        } else {
-            self.core.read_ppu(addr)
-        }
+        self.core.read_ppu(addr)
     }
 
     fn write_ppu(&mut self, addr: u16, value: u8) -> u8 {
-        if self.core.chr_ram.converter.contains_addr(addr) {
-            let bank = self.chr_bank(addr);
-            self.core.chr_ram.write_to_bank(bank, addr, value)
-        } else {
-            self.core.write_ppu(addr, value)
-        }
+        self.core.write_ppu(addr, value)
     }
 
     fn cpu_bus_clock(&mut self) -> InterruptFlags {

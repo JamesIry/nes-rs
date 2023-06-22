@@ -1,6 +1,6 @@
 use crate::{
     bus::InterruptFlags,
-    nes::cartridge::{address_converters::AddressConverter, CartridgeCore, Mapper},
+    nes::cartridge::{CartridgeCore, Mapper},
 };
 
 /**
@@ -12,27 +12,24 @@ pub struct UxRom {
 
 impl UxRom {
     pub fn new(mut core: CartridgeCore) -> Self {
-        core.prg_rom.converter.bank_size_k = 16;
+        core.prg_rom.set_bank_size_k(16);
+        core.prg_rom.set_bank(1, -1);
         Self { core }
     }
 
     fn configure(&mut self, _addr: u16, value: u8) -> u8 {
-        let old = self.core.prg_rom.converter.bank;
-        self.core.prg_rom.converter.bank = value;
+        let old = self.core.prg_rom.get_bank(0) as u8;
+        self.core.prg_rom.set_bank(0, value as i16);
         old
     }
 }
 
 impl Mapper for UxRom {
     fn read_cpu(&mut self, addr: u16) -> u8 {
-        if 0xC000 <= addr {
-            self.core.prg_rom.read_from_bank(-1, addr)
-        } else {
-            self.core.read_cpu(addr)
-        }
+        self.core.read_cpu(addr)
     }
     fn write_cpu(&mut self, addr: u16, value: u8) -> u8 {
-        if self.core.prg_rom.converter.contains_addr(addr) {
+        if self.core.prg_rom.contains_addr(addr) {
             self.configure(addr, value)
         } else {
             self.core.write_cpu(addr, value)

@@ -1,6 +1,6 @@
 use crate::{
     bus::InterruptFlags,
-    nes::cartridge::{address_converters::AddressConverter, CartridgeCore, Mapper},
+    nes::cartridge::{CartridgeCore, Mapper},
 };
 
 /**
@@ -12,15 +12,18 @@ pub struct ColorDreams {
 
 impl ColorDreams {
     pub fn new(mut core: CartridgeCore) -> Self {
-        core.prg_rom.converter.bank_size_k = 32;
-        core.chr_ram.converter.bank_size_k = 8;
+        core.prg_rom.set_bank_size_k(32);
+        core.chr_ram.set_bank_size_k(9);
         Self { core }
     }
 
     fn configure(&mut self, _addr: u16, value: u8) -> u8 {
-        let old = (self.core.chr_ram.converter.bank << 4) | self.core.prg_rom.converter.bank;
-        self.core.chr_ram.converter.bank = value & (0b11110000) >> 4;
-        self.core.prg_rom.converter.bank = value & 0b00000011;
+        let old =
+            ((self.core.chr_ram.get_bank(0) << 4) as u8) | (self.core.prg_rom.get_bank(0) as u8);
+        self.core
+            .chr_ram
+            .set_bank(0, (value & (0b11110000) >> 4) as i16);
+        self.core.prg_rom.set_bank(0, (value & 0b00000011) as i16);
 
         old
     }
@@ -31,7 +34,7 @@ impl Mapper for ColorDreams {
         self.core.read_cpu(addr)
     }
     fn write_cpu(&mut self, addr: u16, value: u8) -> u8 {
-        if self.core.prg_rom.converter.contains_addr(addr) {
+        if self.core.prg_rom.contains_addr(addr) {
             self.configure(addr, value)
         } else {
             self.core.write_cpu(addr, value)

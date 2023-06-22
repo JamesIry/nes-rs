@@ -1,6 +1,6 @@
 use crate::{
     bus::InterruptFlags,
-    nes::cartridge::{address_converters::AddressConverter, CartridgeCore, Mapper},
+    nes::cartridge::{CartridgeCore, Mapper},
 };
 
 /**
@@ -14,7 +14,7 @@ pub struct CNRom {
 
 impl CNRom {
     pub fn new(mut core: CartridgeCore, copy_protection: bool) -> Self {
-        core.chr_ram.converter.bank_size_k = 8;
+        core.chr_ram.set_bank_size_k(8);
         let remaining_junk_reads = if copy_protection { 2 } else { 0 };
         Self {
             core,
@@ -23,8 +23,8 @@ impl CNRom {
     }
 
     fn configure(&mut self, _addr: u16, value: u8) -> u8 {
-        let old = self.core.chr_ram.converter.bank;
-        self.core.chr_ram.converter.bank = value;
+        let old = self.core.chr_ram.get_bank(0) as u8;
+        self.core.chr_ram.set_bank(0, value as i16);
         old
     }
 }
@@ -34,7 +34,7 @@ impl Mapper for CNRom {
         self.core.read_cpu(addr)
     }
     fn write_cpu(&mut self, addr: u16, value: u8) -> u8 {
-        if self.core.prg_rom.converter.contains_addr(addr) {
+        if self.core.prg_rom.contains_addr(addr) {
             self.configure(addr, value)
         } else {
             self.core.write_cpu(addr, value)
