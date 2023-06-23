@@ -51,7 +51,7 @@ impl MMC1 {
 
         if self.cycle_count != self.last_write_cycle + 1 {
             self.last_write_cycle = self.cycle_count;
-            if value & 0b00010000 != 0 {
+            if value & 0b10000000 != 0 {
                 self.control_reg |= 0b00001100;
                 self.shift_count = 0;
                 self.shift_register = 0;
@@ -131,11 +131,11 @@ impl MMC1 {
     }
 
     fn prg_bank_mode(&self) -> u8 {
-        self.control_reg & 0b00001100 >> 2
+        (self.control_reg & 0b00001100) >> 2
     }
 
     fn chr_bank_mode(&self) -> u8 {
-        self.control_reg & 0b00010000 >> 4
+        (self.control_reg & 0b00010000) >> 4
     }
 
     fn set_chr_reg(&mut self, reg: u8, value: u8) {
