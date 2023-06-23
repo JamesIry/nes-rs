@@ -1,15 +1,16 @@
 An in progress emulator for the venerable Nintendo Entertainment System. Within the limitations listed in the todo list below, it has a pretty complete core and can run a good variety of games. One key thing missing is any kind of UI. Specify the cartridge to load on the command line. The following control scheme is (currently) hard coded
 
-| Control | Key   |
-|-----------------|
-| Up      | W     |
-| Left    | A     |
-| Down    | S     |
-| Right   | D     |
-| A       | K     |
-| B       | J     |
-| Start   | Enter |
-| Select  | \     |
+| Control | Key    |
+| ------- | ------ |
+| Up      | W      |
+| Left    | A      |
+| Down    | S      |
+| Right   | D      |
+| A       | K      |
+| B       | J      |
+| Start   | Enter  |
+| Select  | \      |
+
 
 On my system, the only way to get acceptable performance is cargo run/build --release. Debug mode just won't cut it - PPU cycles take 10x as long under debug as they do under release.
 
