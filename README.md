@@ -65,7 +65,7 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [X] Mapper 180
     - [X] Mapper 185
     - [ ] More TBD
--[ ] Graphical UI
+- [ ] Graphical UI
     - [ ] Cart database
     - [ ] Pause/resume
     - [ ] Input config
