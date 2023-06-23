@@ -453,7 +453,7 @@ impl PPU {
         let result = self.sprite_row_data.current_sprite().get_pattern_address(
             sprite_large_mode,
             sprite_high_mode,
-            self.scan_line as u16,
+            self.scan_line,
         );
 
         result
@@ -483,14 +483,14 @@ impl PPU {
                 }
             };
 
-            if !(self.read_mask_flag(MaskFlags::ShowBG)
-                && (x >= 8 || self.read_mask_flag(MaskFlags::ShowLeft8BG)))
+            if !self.read_mask_flag(MaskFlags::ShowBG)
+                || (x < 8 && !self.read_mask_flag(MaskFlags::ShowLeft8BG))
             {
                 bg_palette = 0;
                 bg_color = 0;
             }
-            if !(self.read_mask_flag(MaskFlags::ShowSprites)
-                && (x >= 8 || self.read_mask_flag(MaskFlags::ShowLeft8Sprites)))
+            if !self.read_mask_flag(MaskFlags::ShowSprites)
+                || (x < 8 && !self.read_mask_flag(MaskFlags::ShowLeft8Sprites))
             {
                 sprite_palette = 0b0100;
                 sprite_color = 0;
@@ -931,10 +931,13 @@ impl VramAddress {
         let y = self.get_y();
         // check to see if y is maxed
         // y can "overflow" past 239 when reading attribute tables, so check
-        // for both 239 and 255
-        if y == 239 || y == 255 {
+        // for both 239 and 255. only wrap at 239 causes
+        // the vertical nametable bit to flip
+        if y == 239 {
             self.set_y(0);
             self.set_vertical_nametable_selected(!self.get_vertical_nametable_selected());
+        } else if y == 255 {
+            self.set_y(0);
         } else {
             self.set_y(y.wrapping_add(1));
         }
@@ -1274,19 +1277,24 @@ impl SpriteRowData {
         }
     }
 
-    fn get_pattern_address(&self, large_sprite_mode: bool, sprite_high_mode: bool, y: u16) -> u16 {
-        let mut y_offset = y.wrapping_sub(self.y as u16);
-
-        let sprite_high = if large_sprite_mode {
-            y_offset > 7
-        } else {
-            sprite_high_mode
-        };
+    fn get_pattern_address(&self, large_sprite_mode: bool, sprite_high_mode: bool, y: i16) -> u16 {
+        let mut y_offset = y.wrapping_sub(self.y as i16);
 
         if self.get_vertical_flip() {
-            let max_sprite_height: u16 = if large_sprite_mode { 15 } else { 7 };
+            let max_sprite_height: i16 = if large_sprite_mode { 15 } else { 7 };
             y_offset = max_sprite_height.wrapping_sub(y_offset);
         }
+
+        let (sprite_high, y_offset, tile_id) = if large_sprite_mode {
+            let sprite_high = self.tile_id & 1 != 0;
+            if y_offset > 7 {
+                (sprite_high, y_offset - 8, (self.tile_id & 0b11111110) | 1)
+            } else {
+                (sprite_high, y_offset, self.tile_id & 0b11111110)
+            }
+        } else {
+            (sprite_high_mode, y_offset, self.tile_id)
+        };
 
         /*
         000 H RRRR CCCC P YYY
@@ -1299,8 +1307,8 @@ impl SpriteRowData {
         +++------------------- 0: Pattern table is 0x0000 - 0x01FFF
         */
         (if sprite_high { 0x1000 } else { 0x0000 })
-            | ((self.tile_id as u16) << 4)
-            | (y_offset & 0b00000111)
+            | ((tile_id as u16) << 4)
+            | (y_offset as u16 & 0b00000111)
         // the "bit plane" is set to 1 by the pattern data fetching code as needed
     }
 
