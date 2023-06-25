@@ -167,10 +167,11 @@ impl CPU {
 
     pub fn clock(&mut self) -> CPUCycleType {
         let (cycle_type, instruction_complete) = if self.jammed || !self.rdy {
-            (CPUCycleType::Read, true)
+            (CPUCycleType::Read, self.rdy)
         } else {
-            let (cycle_type, instruction_complete) = if self.remaining_cycles > 0 {
-                let instruction_complete = if self.remaining_cycles == 1 {
+            let instruction_complete = (self.remaining_cycles + self.extra_cycles) == 1;
+            let cycle_type = if self.remaining_cycles > 0 {
+                if self.remaining_cycles == 1 {
                     if self.mode == Mode::Imp {
                         // no arg operations get an extra dummy read
                         self.read_bus_byte(self.pc);
@@ -183,15 +184,12 @@ impl CPU {
                         self.extra_cycles += 1;
                     }
                     self.monitor.end_instruction().unwrap(); // TODO propogate error
-                    true
-                } else {
-                    false
                 };
                 self.remaining_cycles -= 1;
-                (CPUCycleType::Write, instruction_complete)
+                CPUCycleType::Write
             } else if self.extra_cycles > 0 {
                 self.extra_cycles -= 1;
-                (CPUCycleType::Read, false)
+                CPUCycleType::Read
             } else {
                 let (instruction, mode, cycles, cycle_on_boundary) = match self.interrupt {
                     Some(interrupt) => {
@@ -227,7 +225,7 @@ impl CPU {
                 self.remaining_cycles = cycles.wrapping_sub(1);
                 self.extra_cycles = 0;
                 self.cycle_on_page_boundary = cycle_on_boundary;
-                (CPUCycleType::Read, false)
+                CPUCycleType::Read
             };
             self.cycles += 1;
             (cycle_type, instruction_complete)

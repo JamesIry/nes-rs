@@ -84,6 +84,8 @@ where
     nes.load_cartridge(cartridge_name.to_string())?;
     let joypad1 = Rc::new(RefCell::new(JoyPad::new()));
     nes.plugin_controller1(joypad1.clone());
+    let joypad2 = Rc::new(RefCell::new(JoyPad::new()));
+    nes.plugin_controller2(joypad2.clone());
 
     nes.reset();
 
@@ -161,7 +163,7 @@ where
 
             let keys: HashSet<Key> = HashSet::from_iter(window.get_keys().into_iter());
 
-            let input: u8 = check_keycode(&keys, Key::W, JoyPadButton::Up)
+            let joypad_input_1: u8 = check_keycode(&keys, Key::W, JoyPadButton::Up)
                 | check_keycode(&keys, Key::A, JoyPadButton::Left)
                 | check_keycode(&keys, Key::S, JoyPadButton::Down)
                 | check_keycode(&keys, Key::D, JoyPadButton::Right)
@@ -169,8 +171,11 @@ where
                 | check_keycode(&keys, Key::K, JoyPadButton::B)
                 | check_keycode(&keys, Key::Enter, JoyPadButton::Start)
                 | check_keycode(&keys, Key::Backslash, JoyPadButton::Select);
+            joypad1.as_ref().borrow_mut().set_buttons(joypad_input_1);
 
-            joypad1.as_ref().borrow_mut().set_buttons(input);
+            // not fully mapped, just enough to get mapper 105 tested
+            let joypad_input_2: u8 = check_keycode(&keys, Key::P, JoyPadButton::Start);
+            joypad2.as_ref().borrow_mut().set_buttons(joypad_input_2);
 
             if window.is_key_pressed(Key::M, KeyRepeat::No) {
                 muted = !muted;
