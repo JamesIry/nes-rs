@@ -5,7 +5,7 @@ use super::MirrorType;
 
 const MAX_BANKS: usize = 8;
 pub struct MemoryRegion {
-    memory: Vec<u8>,
+    pub memory: Vec<u8>,
 
     pub start_address: u16,
     pub end_address: u16,

@@ -59,4 +59,8 @@ impl Mapper for CNRom {
     }
 
     fn ppu_bus_clock(&mut self) {}
+
+    fn core(&self) -> &CartridgeCore {
+        &self.core
+    }
 }

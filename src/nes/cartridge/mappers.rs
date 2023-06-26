@@ -43,6 +43,8 @@ pub trait Mapper {
     fn ppu_bus_clock(&mut self);
     fn read_ppu(&mut self, addr: u16) -> u8;
     fn write_ppu(&mut self, addr: u16, value: u8) -> u8;
+
+    fn core(&self) -> &CartridgeCore;
 }
 pub struct NulMapper {}
 
@@ -66,4 +68,8 @@ impl Mapper for NulMapper {
     }
 
     fn ppu_bus_clock(&mut self) {}
+
+    fn core(&self) -> &CartridgeCore {
+        unreachable!()
+    }
 }

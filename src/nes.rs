@@ -129,6 +129,10 @@ impl NES {
     pub fn plugin_controller2(&mut self, controller: Rc<RefCell<dyn Controller>>) {
         self.controller2 = controller;
     }
+
+    pub fn save_sram(&self) -> Result<()> {
+        self.cartridge_cpu_port.borrow().save_sram()
+    }
 }
 
 impl Default for NES {

@@ -213,6 +213,10 @@ impl Mapper for NesEvent {
     fn ppu_bus_clock(&mut self) {
         self.cycle_count += 1;
     }
+
+    fn core(&self) -> &CartridgeCore {
+        &self.core
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

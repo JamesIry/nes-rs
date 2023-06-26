@@ -23,7 +23,7 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [X] Cartridge Core
     - [X] INes 1.0
     - [ ] INes 2.0
-    - [ ] Persistent SRAM
+    - [X] Persistent SRAM
 - [X] Input
     - [X] General controller support infra
     - [X] Joypad 1
@@ -60,7 +60,7 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [ ] Mapper 19
 - [ ] Related Mappers
     - [X] Mapper 94
-    - [ ] Mapper 105 (in progress)
+    - [X] Mapper 105
     - [X] Mapper 155
     - [X] Mapper 180
     - [X] Mapper 185

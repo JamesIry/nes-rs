@@ -191,6 +191,8 @@ where
         }
     }
 
+    nes.save_sram()?;
+
     // ensures that the audio thread is killed
     drop(sender);
     Ok(())

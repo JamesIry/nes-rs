@@ -2,7 +2,13 @@ mod mappers;
 mod memory_region;
 
 use anyhow::Result;
-use std::{cell::RefCell, fs::File, io::BufReader, io::Read, rc::Rc};
+use std::{
+    cell::RefCell,
+    fs::File,
+    io::{BufReader, BufWriter, Read, Write},
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 use thiserror::Error;
 
 use mappers::Mapper;
@@ -49,6 +55,9 @@ impl Cartridge {
         let rom_expansion = MemoryRegion::new(rom_expansion_vec, 0x4000, 0x5FFF, true);
 
         let mut sram_vec = vec![0; nes_header.sram_size];
+        if nes_header.sram_is_persistent {
+            Cartridge::load_sram(&mut sram_vec, file_name)?;
+        }
         if nes_header.has_trainer {
             let mut trainer_ram = vec![0; 512];
             reader.read_exact(&mut trainer_ram)?;
@@ -77,7 +86,8 @@ impl Cartridge {
         let mapper_number = nes_header.mapper_number;
 
         let core = CartridgeCore {
-            _nes_header: nes_header,
+            nes_header,
+            cart_name: file_name.to_string(),
             rom_expansion,
             sram,
             prg_rom,
@@ -90,6 +100,32 @@ impl Cartridge {
 
     pub(crate) fn nul_cartridge() -> Box<dyn Mapper> {
         Box::new(NulMapper {})
+    }
+
+    fn save_path(cart_name: &str) -> PathBuf {
+        let cart_path = Path::new(cart_name);
+        cart_path.with_extension("sav")
+    }
+
+    fn load_sram(sram_vec: &mut [u8], cart_name: &str) -> Result<()> {
+        let save_path = Cartridge::save_path(cart_name);
+        if save_path.exists() {
+            let save_file = File::open(save_path)?;
+            let mut reader = BufReader::new(save_file);
+            reader.read_exact(sram_vec)?;
+        }
+
+        Ok(())
+    }
+
+    fn save_sram(sram_vec: &[u8], cart_name: &str) -> Result<()> {
+        let save_path = Cartridge::save_path(cart_name);
+        let save_file = File::create(save_path)?;
+
+        let mut writer = BufWriter::new(save_file);
+        writer.write_all(sram_vec)?;
+
+        Ok(())
     }
 }
 
@@ -163,7 +199,8 @@ impl NesHeader {
 }
 
 pub struct CartridgeCore {
-    _nes_header: NesHeader,
+    nes_header: NesHeader,
+    cart_name: String,
     rom_expansion: MemoryRegion,
     sram: MemoryRegion,
     prg_rom: MemoryRegion,
@@ -213,6 +250,14 @@ impl CartridgeCore {
             panic!("Unrecognized address {}", addr)
         }
     }
+
+    fn save_sram(&self) -> Result<()> {
+        if self.nes_header.sram_is_persistent {
+            Cartridge::save_sram(&self.sram.memory, &self.cart_name)?;
+        }
+
+        Ok(())
+    }
 }
 
 pub struct CartridgeCPUPort {
@@ -222,6 +267,10 @@ pub struct CartridgeCPUPort {
 impl CartridgeCPUPort {
     pub fn new(cartridge: Rc<RefCell<Box<dyn Mapper>>>) -> Self {
         Self { cartridge }
+    }
+
+    pub fn save_sram(&self) -> Result<()> {
+        self.cartridge.borrow().core().save_sram()
     }
 }
 

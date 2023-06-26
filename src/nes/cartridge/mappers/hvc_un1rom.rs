@@ -50,4 +50,8 @@ impl Mapper for HvcUN1Rom {
     }
 
     fn ppu_bus_clock(&mut self) {}
+
+    fn core(&self) -> &CartridgeCore {
+        &self.core
+    }
 }

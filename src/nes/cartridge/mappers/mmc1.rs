@@ -217,4 +217,8 @@ impl Mapper for MMC1 {
     fn ppu_bus_clock(&mut self) {
         self.cycle_count += 1;
     }
+
+    fn core(&self) -> &CartridgeCore {
+        &self.core
+    }
 }
