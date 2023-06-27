@@ -1,15 +1,15 @@
 An in progress emulator for the venerable Nintendo Entertainment System. Within the limitations listed in the todo list below, it has a pretty complete core and can run a good variety of games. One key thing missing is any kind of UI. Specify the cartridge to load on the command line. The following control scheme is (currently) hard coded
 
-| Control | Key    |
-| ------- | ------ |
-| Up      | W      |
-| Left    | A      |
-| Down    | S      |
-| Right   | D      |
-| A       | K      |
-| B       | J      |
-| Start   | Enter  |
-| Select  | \      |
+| Control | Key   |
+| ------- | ----- |
+| Up      | W     |
+| Left    | A     |
+| Down    | S     |
+| Right   | D     |
+| A       | K     |
+| B       | J     |
+| Start   | Enter |
+| Select  | \     |
 
 
 On my system, the only way to get acceptable performance is cargo run/build --release. Debug mode just won't cut it - PPU cycles take 10x as long under debug as they do under release.
@@ -47,9 +47,9 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [ ] Accurate NMI timing
     - [ ] DMA should only pause CPU on 'read' cycle
     - [ ] DMC DMA and OAM DMA interact in weird ways
-- [ ] Top 10 Mappers
+- [ ] Top 10 Mappers [^1]
     - [X] Mapper 1
-    - [ ] Mapper 4 
+    - [ ] Mapper 4 (in progress)
     - [X] Mapper 2 
     - [X] Mapper 0 
     - [X] Mapper 3 
@@ -69,3 +69,5 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [ ] Cart database
     - [ ] Pause/resume
     - [ ] Input config
+
+[^1]: Mappers are software "shims" used to create compatibility with different cartridges.The original NES was quite limited in the capacity and capability built into the machine. However, as time went by and chips became cheaper, cartridges added their own capabilities and capacities by adding more memory storage, interrupt counters, and even sound channels. The bits of software needed to emulate different cartridge capabilities are called "mappers" because much of what they do is "map" a limited range memory addresses to large memory stores via address banking. Those mappers can't be captured in cartidge dumps, so emulator authors have to build them. The bad news is that there are hundreds of mappers. The good news is that the top 10 will cover ~90% of all cartridges.

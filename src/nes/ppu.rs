@@ -744,6 +744,8 @@ impl BusDevice for PPU {
                             self.write_toggle = false;
                             let result = self.temporary_vram_address.set_address_low(data);
                             self.vram_address.register = self.temporary_vram_address.register;
+                            // do an extra read to signal for MMC3 style mappers
+                            self.bus.read(self.vram_address.get_nametable_address());
                             result
                         }
                     } else {

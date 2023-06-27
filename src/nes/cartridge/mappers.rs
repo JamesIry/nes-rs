@@ -4,7 +4,7 @@ use crate::bus::InterruptFlags;
 
 use self::{
     axrom::AxRom, cnrom::CNRom, color_dreams::ColorDreams, hvc_un1rom::HvcUN1Rom, mmc1::MMC1,
-    nes_event::NesEvent, nrom::NRom, uxrom::UxRom, uxrom_invert::UxRomInvert,
+    mmc3::MMC3, nes_event::NesEvent, nrom::NRom, uxrom::UxRom, uxrom_invert::UxRomInvert,
 };
 
 use super::{CartridgeCore, CartridgeError};
@@ -14,6 +14,7 @@ pub mod cnrom;
 pub mod color_dreams;
 pub mod hvc_un1rom;
 pub mod mmc1;
+pub mod mmc3;
 pub mod nes_event;
 pub mod nrom;
 pub mod uxrom;
@@ -25,6 +26,7 @@ pub fn get_mapper(mapper_number: u8, core: CartridgeCore) -> Result<Box<dyn Mapp
         1 => Box::new(MMC1::new(core, false)),
         2 => Box::new(UxRom::new(core)),
         3 => Box::new(CNRom::new(core, false)),
+        4 => Box::new(MMC3::new(core)),
         7 => Box::new(AxRom::new(core)),
         11 => Box::new(ColorDreams::new(core)),
         94 => Box::new(HvcUN1Rom::new(core)),
