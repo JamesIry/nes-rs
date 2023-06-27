@@ -3,7 +3,7 @@ use crate::{
     nes::cartridge::{CartridgeCore, Mapper, MirrorType},
 };
 
-const A12_SKIP_COUNT: u8 = 8;
+const A12_SKIP_COUNT: u8 = 1;
 
 /**
  * Mapper 4
@@ -43,7 +43,7 @@ impl MMC3 {
             irq_enabled: false,
             irq_occurred: false,
             irq_count: 0,
-            a12_state: A12State::None,
+            a12_state: A12State::WasLow(0),
         };
         result.reconfigure_banks();
         result
@@ -86,6 +86,7 @@ impl MMC3 {
             }
             0xC001..=0xDFFF if addr & 1 == 1 => {
                 let old = if self.irq_reload { 0xFF } else { 0 };
+                self.irq_count = 0;
                 self.irq_reload = true;
                 old
             }
@@ -179,29 +180,29 @@ impl MMC3 {
     fn check_a12(&mut self, addr: u16) {
         let a12_high = addr & 0b0001_0000_0000_0000 != 0;
         match (a12_high, self.a12_state) {
-            (true, A12State::None) => (),
-            (true, A12State::Low(_)) => self.a12_state = A12State::None,
-            (true, A12State::Ready) => {
-                self.a12_state = A12State::None;
-                self.clock_scanline();
+            (true, A12State::WasLow(n)) => {
+                self.a12_state = A12State::WasHigh;
+                if n == 0 {
+                    self.clock_scanline();
+                }
             }
-            (false, A12State::Ready) => (),
-            (false, A12State::None) => self.a12_state = A12State::Low(A12_SKIP_COUNT),
-            (false, A12State::Low(0)) => self.a12_state = A12State::Ready,
-            (false, A12State::Low(n)) => self.a12_state = A12State::Low(n.wrapping_sub(1)),
+            (true, A12State::WasHigh) => (),
+            (false, A12State::WasHigh) => self.a12_state = A12State::WasLow(A12_SKIP_COUNT),
+            (false, A12State::WasLow(0)) => (),
+            (false, A12State::WasLow(n)) => self.a12_state = A12State::WasLow(n.wrapping_sub(1)),
         }
     }
 
     fn clock_scanline(&mut self) {
-        if self.irq_count == 0 {
-            self.irq_occurred = self.irq_enabled;
-        }
-
         if self.irq_reload || self.irq_count == 0 {
             self.irq_count = self.irq_latch;
             self.irq_reload = false;
         } else {
             self.irq_count = self.irq_count.wrapping_sub(1);
+        }
+
+        if self.irq_count == 0 {
+            self.irq_occurred = self.irq_enabled;
         }
     }
 }
@@ -229,7 +230,6 @@ impl Mapper for MMC3 {
 
     fn cpu_bus_clock(&mut self) -> InterruptFlags {
         if self.irq_enabled && self.irq_occurred {
-            println!("*** IRQ ***");
             InterruptFlags::IRQ
         } else {
             InterruptFlags::empty()
@@ -245,7 +245,6 @@ impl Mapper for MMC3 {
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 enum A12State {
-    Ready,
-    Low(u8),
-    None,
+    WasLow(u8),
+    WasHigh,
 }
