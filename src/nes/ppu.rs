@@ -120,6 +120,7 @@ impl PPU {
             self.manage_scrolling();
         }
         let end_of_frame = self.manage_tick();
+        self.bus.clock();
         (end_of_frame, pixel_info)
     }
 
@@ -152,6 +153,10 @@ impl PPU {
         // oam_data
         // vram_address (but temp is cleared)
         // palette_table
+    }
+
+    fn start_bus_request(&mut self, bus_request: BusRequest) {
+        self.bus_request = bus_request;
     }
 
     fn manage_bus_request(&mut self) {
@@ -357,7 +362,9 @@ impl PPU {
         if self.dot > 0 {
             match self.dot % 8 {
                 1 => {
-                    self.bus_request = BusRequest::Read(self.vram_address.get_nametable_address());
+                    self.start_bus_request(BusRequest::Read(
+                        self.vram_address.get_nametable_address(),
+                    ));
                     if self.dot >= 9 {
                         self.bg_shift_registers.latch();
                     }
@@ -366,16 +373,14 @@ impl PPU {
                     .bg_shift_registers
                     .load_name_table_data(self.data_buffer),
 
-                3 if self.dot != 339 => {
-                    self.bus_request = BusRequest::Read(self.vram_address.get_attribute_address())
-                }
+                3 if self.dot != 339 => self
+                    .start_bus_request(BusRequest::Read(self.vram_address.get_attribute_address())),
                 4 if self.dot != 340 => self
                     .bg_shift_registers
                     .load_attribute_data(self.data_buffer, self.vram_address.get_attribute_shift()),
 
-                3 if self.dot == 339 => {
-                    self.bus_request = BusRequest::Read(self.vram_address.get_nametable_address())
-                }
+                3 if self.dot == 339 => self
+                    .start_bus_request(BusRequest::Read(self.vram_address.get_nametable_address())),
                 4 if self.dot == 340 => self
                     .bg_shift_registers
                     .load_name_table_data(self.data_buffer),
@@ -383,15 +388,15 @@ impl PPU {
                 5 => {
                     if 261 <= self.dot && self.dot <= 320 {
                         if -1 <= self.scan_line && self.scan_line <= 239 {
-                            self.bus_request =
-                                BusRequest::Read(self.compute_base_sprite_pattern_address());
+                            let addr = self.compute_base_sprite_pattern_address();
+                            self.start_bus_request(BusRequest::Read(addr));
                         }
                     } else {
                         let address = self.bg_shift_registers.get_pattern_address(
                             self.read_ctrl_flag(CtrlFlags::BackgroundPatternHigh),
                             self.vram_address.get_fine_y(),
                         );
-                        self.bus_request = BusRequest::Read(address);
+                        self.start_bus_request(BusRequest::Read(address));
                     };
                 }
                 6 => {
@@ -409,16 +414,15 @@ impl PPU {
                 7 => {
                     if 261 <= self.dot && self.dot <= 320 {
                         if -1 <= self.scan_line && self.scan_line <= 239 {
-                            self.bus_request = BusRequest::Read(
-                                self.compute_base_sprite_pattern_address() | 0b00001000,
-                            );
+                            let addr = self.compute_base_sprite_pattern_address() | 0b00001000;
+                            self.start_bus_request(BusRequest::Read(addr));
                         }
                     } else {
                         let address = self.bg_shift_registers.get_pattern_address(
                             self.read_ctrl_flag(CtrlFlags::BackgroundPatternHigh),
                             self.vram_address.get_fine_y(),
                         ) | 0b00001000;
-                        self.bus_request = BusRequest::Read(address);
+                        self.start_bus_request(BusRequest::Read(address));
                     };
                 }
                 0 => {
@@ -681,7 +685,7 @@ impl BusDevice for PPU {
                         self.data_buffer
                     };
                     // vram is read even when in palette address range
-                    self.bus_request = BusRequest::Read(addr);
+                    self.start_bus_request(BusRequest::Read(addr));
 
                     self.inc_vram_addr();
                     result
@@ -758,7 +762,7 @@ impl BusDevice for PPU {
                         self.write_palette(addr, data)
                     } else {
                         let old = self.data_buffer;
-                        self.bus_request = BusRequest::Write(addr, data);
+                        self.start_bus_request(BusRequest::Write(addr, data));
                         old
                     };
                     self.inc_vram_addr();
@@ -1182,6 +1186,7 @@ impl BGShiftRegisterSet {
  * palettes. So this enum represent a bus action to perform on
  * the next cycle
  */
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum BusRequest {
     Read(u16),
     Write(u16, u8),

@@ -3,7 +3,7 @@ use crate::{
     nes::cartridge::{CartridgeCore, Mapper, MirrorType},
 };
 
-const A12_SKIP_COUNT: u8 = 1;
+const A12_SKIP_COUNT: u8 = 9;
 
 /**
  * Mapper 4
@@ -45,12 +45,21 @@ impl MMC3 {
             irq_count: 0,
             a12_state: A12State::WasLow(0),
         };
+        result.registers[0] = 0;
+        result.registers[1] = 2;
+        result.registers[2] = 4;
+        result.registers[3] = 5;
+        result.registers[4] = 6;
+        result.registers[5] = 7;
+
+        result.registers[6] = 0;
+        result.registers[7] = 1;
+
         result.reconfigure_banks();
         result
     }
 
     fn configure(&mut self, addr: u16, value: u8) -> u8 {
-        println!("Configure {:#0x} {:#0b}", addr, value);
         match addr {
             0x8000..=0x9FFE if addr & 1 == 0 => {
                 let old = self.set_bank_select(value);
@@ -187,9 +196,8 @@ impl MMC3 {
                 }
             }
             (true, A12State::WasHigh) => (),
-            (false, A12State::WasHigh) => self.a12_state = A12State::WasLow(A12_SKIP_COUNT),
-            (false, A12State::WasLow(0)) => (),
-            (false, A12State::WasLow(n)) => self.a12_state = A12State::WasLow(n.wrapping_sub(1)),
+            (false, A12State::WasHigh) => self.a12_state = A12State::WasLow(A12_SKIP_COUNT - 1),
+            (false, A12State::WasLow(_)) => (),
         }
     }
 
@@ -236,7 +244,13 @@ impl Mapper for MMC3 {
         }
     }
 
-    fn ppu_bus_clock(&mut self) {}
+    fn ppu_bus_clock(&mut self) {
+        match self.a12_state {
+            A12State::WasLow(0) => (),
+            A12State::WasLow(n) => self.a12_state = A12State::WasLow(n.wrapping_sub(1)),
+            A12State::WasHigh => (),
+        }
+    }
 
     fn core(&self) -> &CartridgeCore {
         &self.core

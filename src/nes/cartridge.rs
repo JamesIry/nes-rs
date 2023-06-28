@@ -160,8 +160,7 @@ impl NesHeader {
         let mirror_type = match (four_screen, vertical_mirroring) {
             (false, false) => MirrorType::Horizontal,
             (false, true) => MirrorType::Vertical,
-            (true, false) => MirrorType::FourScreen,
-            (true, true) => MirrorType::SingleScreen(0),
+            (true, _) => MirrorType::FourScreen,
         };
 
         let prg_rom_size = (header[4] as usize) * PRG_ROM_PAGE_SIZE;
