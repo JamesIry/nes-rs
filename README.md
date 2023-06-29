@@ -49,7 +49,7 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [ ] DMC DMA and OAM DMA interact in weird ways
 - [ ] Top 10 Mappers [^1]
     - [X] Mapper 1
-    - [ ] Mapper 4 (in progress)
+    - [X] Mapper 4
     - [X] Mapper 2 
     - [X] Mapper 0 
     - [X] Mapper 3 

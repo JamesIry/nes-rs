@@ -15,7 +15,10 @@ use mappers::Mapper;
 
 use crate::bus::{BusDevice, InterruptFlags};
 
-use self::{mappers::NulMapper, memory_region::MemoryRegion};
+use self::{
+    mappers::NulMapper,
+    memory_region::{MemoryRegion, MemoryType},
+};
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 #[allow(dead_code)]
@@ -52,7 +55,13 @@ impl Cartridge {
 
         let rom_expansion_size = 0x2000;
         let rom_expansion_vec = vec![0; rom_expansion_size];
-        let rom_expansion = MemoryRegion::new(rom_expansion_vec, 0x4000, 0x5FFF, true);
+        let rom_expansion = MemoryRegion::new(
+            MemoryType::ROM_EXPANSION,
+            rom_expansion_vec,
+            0x4000,
+            0x5FFF,
+            true,
+        );
 
         let mut sram_vec = vec![0; nes_header.sram_size];
         if nes_header.sram_is_persistent {
@@ -63,23 +72,29 @@ impl Cartridge {
             reader.read_exact(&mut trainer_ram)?;
             sram_vec[0x7000..(0x7000 + 512)].copy_from_slice(&trainer_ram[..512]);
         }
-        let sram = MemoryRegion::new(sram_vec, 0x6000, 0x7FFF, false);
+        let sram = MemoryRegion::new(MemoryType::SRAM, sram_vec, 0x6000, 0x7FFF, false);
 
         let mut prg_rom_vec = vec![0; nes_header.prg_rom_size];
         reader.read_exact(&mut prg_rom_vec)?;
-        let prg_rom = MemoryRegion::new(prg_rom_vec, 0x8000, 0xFFFF, true);
+        let prg_rom = MemoryRegion::new(MemoryType::PRG_ROM, prg_rom_vec, 0x8000, 0xFFFF, true);
 
         let mut chr_rom_vec = vec![0; nes_header.chr_rom_size];
         if nes_header.chr_is_rom {
             reader.read_exact(&mut chr_rom_vec)?;
         }
-        let chr_ram = MemoryRegion::new(chr_rom_vec, 0x0000, 0x1FFF, nes_header.chr_is_rom);
+        let chr_type = if nes_header.chr_is_rom {
+            MemoryType::CHR_ROM
+        } else {
+            MemoryType::CHR_RAM
+        };
+        let chr_ram =
+            MemoryRegion::new(chr_type, chr_rom_vec, 0x0000, 0x1FFF, nes_header.chr_is_rom);
 
         // vram goes all the way to 0x3FFF even though palette ram occupies
         // 0x3F00-0x3FFF. That's because the PPU 'shadow' reads
         // vram even when reading palettes
         let vram_vec = vec![0; VRAM_SIZE];
-        let mut vram = MemoryRegion::new(vram_vec, 0x2000, 0x3FFF, false);
+        let mut vram = MemoryRegion::new(MemoryType::VRAM, vram_vec, 0x2000, 0x3FFF, false);
         vram.set_bank_size_k(1);
         vram.set_mirror_type(nes_header.mirror_type);
 

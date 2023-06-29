@@ -5,6 +5,7 @@ use super::MirrorType;
 
 const MAX_BANKS: usize = 8;
 pub struct MemoryRegion {
+    pub memory_type: MemoryType,
     pub memory: Vec<u8>,
 
     pub start_address: u16,
@@ -20,12 +21,14 @@ pub struct MemoryRegion {
 
 impl MemoryRegion {
     pub fn new(
+        memory_type: MemoryType,
         memory: Vec<u8>,
         start_address: u16,
         end_address: u16,
         write_protect: bool,
     ) -> MemoryRegion {
         let mut result = Self {
+            memory_type,
             memory,
             start_address,
             end_address,
@@ -58,7 +61,7 @@ impl MemoryRegion {
     }
 
     pub fn get_memory_size_k(&mut self) -> u16 {
-        self.memory.len() as u16
+        (self.memory.len() / 1024) as u16
     }
 
     pub fn set_bank_size_k(&mut self, bank_size_k: u16) {
@@ -119,18 +122,24 @@ impl MemoryRegion {
         let page = raw_index / self.bank_size;
         assert!(
             page < self.page_count,
-            " page too big {:#0x}, {} >= {}",
+            "{:?} page too big addr {:#0x} (index {:#0x}) {} >= {}. Bank size is {}",
+            self.memory_type,
             addr,
+            raw_index,
             page,
-            self.page_count
+            self.page_count,
+            self.bank_size,
         );
         let bank = self.bank_map[page];
         assert!(
             (bank as isize) < (self.bank_count as isize),
-            " bank too big {:#0x}, {} >= {}",
+            "{:?} bank too big addr {:#0x} (index {:#0x}). {} >= {}. Bank size is {}",
+            self.memory_type,
             addr,
+            raw_index,
             bank,
-            self.bank_count
+            self.bank_count,
+            self.bank_size,
         );
 
         let base = if bank >= 0 {
@@ -152,4 +161,15 @@ impl MemoryRegion {
 
 fn k_to_usize(k: u16) -> usize {
     (k as usize) * 1024
+}
+
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MemoryType {
+    SRAM,
+    VRAM,
+    CHR_RAM,
+    CHR_ROM,
+    PRG_ROM,
+    ROM_EXPANSION,
 }
