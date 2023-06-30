@@ -151,25 +151,15 @@ impl MMC3 {
                 .set_bank(7, (self.registers[1] & 0b1111_1110) as i16 + 1);
         }
 
-        let prg_mask = (self.core.prg_rom.get_memory_size_k() / 8 - 1) as u8;
-
         if self.prg_bank_mode == 0 {
-            self.core
-                .prg_rom
-                .set_bank(0, (self.registers[6] & prg_mask) as i16);
-            self.core
-                .prg_rom
-                .set_bank(1, (self.registers[7] & prg_mask) as i16);
+            self.core.prg_rom.set_bank(0, self.registers[6] as i16);
+            self.core.prg_rom.set_bank(1, self.registers[7] as i16);
             self.core.prg_rom.set_bank(2, -2);
             self.core.prg_rom.set_bank(3, -1);
         } else {
             self.core.prg_rom.set_bank(0, -2);
-            self.core
-                .prg_rom
-                .set_bank(1, (self.registers[7] & prg_mask) as i16);
-            self.core
-                .prg_rom
-                .set_bank(2, (self.registers[6] & prg_mask) as i16);
+            self.core.prg_rom.set_bank(1, self.registers[7] as i16);
+            self.core.prg_rom.set_bank(2, self.registers[6] as i16);
             self.core.prg_rom.set_bank(3, -1);
         }
 

@@ -131,19 +131,9 @@ impl MemoryRegion {
             self.bank_size,
         );
         let bank = self.bank_map[page];
-        assert!(
-            (bank as isize) < (self.bank_count as isize),
-            "{:?} bank too big addr {:#0x} (index {:#0x}). {} >= {}. Bank size is {}",
-            self.memory_type,
-            addr,
-            raw_index,
-            bank,
-            self.bank_count,
-            self.bank_size,
-        );
 
         let base = if bank >= 0 {
-            bank as usize * self.bank_size
+            (bank as usize % self.bank_count) * self.bank_size
         } else {
             self.memory
                 .len()
