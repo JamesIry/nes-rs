@@ -7,6 +7,7 @@ const MAX_BANKS: usize = 8;
 pub struct MemoryRegion {
     pub memory_type: MemoryType,
     pub memory: Vec<u8>,
+    pub alternate_memory: Vec<u8>,
 
     pub start_address: u16,
     pub end_address: u16,
@@ -14,9 +15,11 @@ pub struct MemoryRegion {
     bank_size: usize,
     page_count: usize,
     bank_count: usize,
-    bank_map: [i16; MAX_BANKS],
+    alternate_bank_count: usize,
+    bank_map: [(i16, bool); MAX_BANKS],
 
     write_protect: bool,
+    alternate_write_protect: bool,
 }
 
 impl MemoryRegion {
@@ -30,28 +33,42 @@ impl MemoryRegion {
         let mut result = Self {
             memory_type,
             memory,
+            alternate_memory: Vec::new(),
             start_address,
             end_address,
             write_protect,
+            alternate_write_protect: true,
 
             bank_size: 0,
             page_count: 0,
             bank_count: 0,
-            bank_map: [0; MAX_BANKS],
+            alternate_bank_count: 0,
+            bank_map: [(0, false); MAX_BANKS],
         };
         result.set_bank_size(result.get_address_size().min(result.memory.len()));
         result
     }
 
     pub fn read(&self, addr: u16) -> u8 {
-        self.memory[self.convert(addr)]
+        let converted = self.convert(addr);
+        if converted.1 {
+            self.alternate_memory[converted.0]
+        } else {
+            self.memory[converted.0]
+        }
     }
 
     pub fn write(&mut self, addr: u16, value: u8) -> u8 {
         let converted = self.convert(addr);
-        let old = self.memory[converted];
-        if !self.write_protect {
-            self.memory[converted] = value;
+        let (memory, write_protect) = if converted.1 {
+            (&mut self.alternate_memory, self.alternate_write_protect)
+        } else {
+            (&mut self.memory, self.write_protect)
+        };
+
+        let old = memory[converted.0];
+        if !write_protect {
+            memory[converted.0] = value;
         }
         old
     }
@@ -73,34 +90,41 @@ impl MemoryRegion {
         self.page_count = self.get_address_size() / self.bank_size;
 
         self.bank_count = self.memory.len() / self.bank_size;
+        self.alternate_bank_count = self.alternate_memory.len() / self.bank_size;
+    }
+
+    pub fn set_alternate_memory(&mut self, alternate_memory: Vec<u8>, write_protect: bool) {
+        self.alternate_memory = alternate_memory;
+        self.alternate_write_protect = write_protect;
+        self.set_bank_size(self.bank_size);
     }
 
     pub fn set_mirror_type(&mut self, mirror_type: MirrorType) {
         match mirror_type {
             MirrorType::Vertical => {
-                self.bank_map[0] = 0;
-                self.bank_map[1] = 1;
-                self.bank_map[2] = 0;
-                self.bank_map[3] = 1;
+                self.bank_map[0] = (0, false);
+                self.bank_map[1] = (1, false);
+                self.bank_map[2] = (0, false);
+                self.bank_map[3] = (1, false);
             }
             MirrorType::Horizontal => {
-                self.bank_map[0] = 0;
-                self.bank_map[1] = 0;
-                self.bank_map[2] = 1;
-                self.bank_map[3] = 1;
+                self.bank_map[0] = (0, false);
+                self.bank_map[1] = (0, false);
+                self.bank_map[2] = (1, false);
+                self.bank_map[3] = (1, false);
             }
             MirrorType::FourScreen => {
-                self.bank_map[0] = 0;
-                self.bank_map[1] = 1;
-                self.bank_map[2] = 2;
-                self.bank_map[3] = 3;
+                self.bank_map[0] = (0, false);
+                self.bank_map[1] = (1, false);
+                self.bank_map[2] = (2, false);
+                self.bank_map[3] = (3, false);
             }
             MirrorType::SingleScreen(n) => {
                 let bank = n as i16;
-                self.bank_map[0] = bank;
-                self.bank_map[1] = bank;
-                self.bank_map[2] = bank;
-                self.bank_map[3] = bank;
+                self.bank_map[0] = (bank, false);
+                self.bank_map[1] = (bank, false);
+                self.bank_map[2] = (bank, false);
+                self.bank_map[3] = (bank, false);
             }
         }
         self.bank_map[4] = self.bank_map[0];
@@ -110,14 +134,18 @@ impl MemoryRegion {
     }
 
     pub fn set_bank(&mut self, page: usize, bank: i16) {
-        self.bank_map[page] = bank;
+        self.bank_map[page] = (bank, self.bank_map[page].1);
+    }
+
+    pub fn select_alternate_memory(&mut self, page: usize, alternate: bool) {
+        self.bank_map[page] = (self.bank_map[page].0, alternate);
     }
 
     pub fn get_bank(&mut self, page: usize) -> i16 {
-        self.bank_map[page]
+        self.bank_map[page].0
     }
 
-    fn convert(&self, addr: u16) -> usize {
+    fn convert(&self, addr: u16) -> (usize, bool) {
         let raw_index = (addr - self.start_address) as usize;
         let page = raw_index / self.bank_size;
         assert!(
@@ -132,16 +160,25 @@ impl MemoryRegion {
         );
         let bank = self.bank_map[page];
 
-        let base = if bank >= 0 {
-            (bank as usize % self.bank_count) * self.bank_size
+        let base = if bank.0 >= 0 {
+            let bank_count = if bank.1 {
+                self.alternate_bank_count
+            } else {
+                self.bank_count
+            };
+            (bank.0 as usize % bank_count) * self.bank_size
         } else {
             self.memory
                 .len()
-                .wrapping_sub((-bank) as usize * self.bank_size)
+                .wrapping_sub((-bank.0) as usize * self.bank_size)
         };
         let offset = raw_index % self.bank_size;
 
-        (base + offset) % self.memory.len()
+        if bank.1 {
+            ((base + offset) % self.alternate_memory.len(), true)
+        } else {
+            ((base + offset) % self.memory.len(), false)
+        }
     }
 
     pub fn contains_addr(&self, addr: u16) -> bool {

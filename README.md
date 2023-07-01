@@ -61,6 +61,8 @@ On my system, the only way to get acceptable performance is cargo run/build --re
 - [ ] Related Mappers
     - [X] Mapper 94
     - [X] Mapper 105
+    - [ ] Mapper 118 (in progress)
+    - [X] Mapper 119
     - [X] Mapper 155
     - [X] Mapper 180
     - [X] Mapper 185

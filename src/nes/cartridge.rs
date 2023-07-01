@@ -163,9 +163,6 @@ impl NesHeader {
         }
 
         let _ines_ver = (header[7] >> 2) & 0x03;
-        if _ines_ver != 0 {
-            Err(CartridgeError::UnsupportedInesVersion)?;
-        }
 
         let four_screen = header[6] & 0x08 != 0;
         let has_trainer = header[6] & 0x04 != 0;
@@ -197,6 +194,10 @@ impl NesHeader {
         let chr_rom_ram = if chr_is_rom { "rom" } else { "ram" };
         println!("sram_size {:#06x} | peristence {} | trainer {} | prg rom size {:#06x} | chr {} size {:#06x} | screen mirroring {:?} | mapper {}",
         sram_size, sram_is_persistent, has_trainer, prg_rom_size, chr_rom_ram, chr_rom_size, mirror_type, mapper_number);
+
+        if _ines_ver != 0 {
+            Err(CartridgeError::UnsupportedInesVersion)?;
+        }
 
         Ok(Self {
             _ines_ver,

@@ -5,9 +5,9 @@ use crate::{
 
 use super::mmc3_irq::MMC3Irq;
 /**
- * Mapper 4
+ * Mapper 119
  */
-pub struct MMC3 {
+pub struct MMC3TQRom {
     core: CartridgeCore,
     chr_bank_mode: u8,
     prg_bank_mode: u8,
@@ -19,10 +19,12 @@ pub struct MMC3 {
     mmc3_irq: MMC3Irq,
 }
 
-impl MMC3 {
+impl MMC3TQRom {
     pub fn new(mut core: CartridgeCore) -> Self {
         core.chr_ram.set_bank_size_k(1);
         core.prg_rom.set_bank_size_k(8);
+        core.chr_ram.set_alternate_memory(vec![0; 8 * 1024], false);
+
         let mut result = Self {
             core,
             chr_bank_mode: 0,
@@ -82,41 +84,33 @@ impl MMC3 {
         }
     }
 
+    fn set_chr_bank(&mut self, page: usize, bank: u8) {
+        let chr_ram = bank & 0b0100_0000 != 0;
+        let bank = (bank & 0b0011_1111) as i16;
+
+        self.core.chr_ram.set_bank(page, bank);
+        self.core.chr_ram.select_alternate_memory(page, chr_ram);
+    }
+
     fn reconfigure_banks(&mut self) {
         if self.chr_bank_mode == 0 {
-            self.core
-                .chr_ram
-                .set_bank(0, (self.registers[0] & 0b1111_1110) as i16);
-            self.core
-                .chr_ram
-                .set_bank(1, (self.registers[0] & 0b1111_1110) as i16 + 1);
-            self.core
-                .chr_ram
-                .set_bank(2, (self.registers[1] & 0b1111_1110) as i16);
-            self.core
-                .chr_ram
-                .set_bank(3, (self.registers[1] & 0b1111_1110) as i16 + 1);
-            self.core.chr_ram.set_bank(4, self.registers[2] as i16);
-            self.core.chr_ram.set_bank(5, self.registers[3] as i16);
-            self.core.chr_ram.set_bank(6, self.registers[4] as i16);
-            self.core.chr_ram.set_bank(7, self.registers[5] as i16);
+            self.set_chr_bank(0, self.registers[0] & 0b1111_1110);
+            self.set_chr_bank(1, (self.registers[0] & 0b1111_1110) + 1);
+            self.set_chr_bank(2, self.registers[1] & 0b1111_1110);
+            self.set_chr_bank(3, (self.registers[1] & 0b1111_1110) + 1);
+            self.set_chr_bank(4, self.registers[2]);
+            self.set_chr_bank(5, self.registers[3]);
+            self.set_chr_bank(6, self.registers[4]);
+            self.set_chr_bank(7, self.registers[5]);
         } else {
-            self.core.chr_ram.set_bank(0, self.registers[2] as i16);
-            self.core.chr_ram.set_bank(1, self.registers[3] as i16);
-            self.core.chr_ram.set_bank(2, self.registers[4] as i16);
-            self.core.chr_ram.set_bank(3, self.registers[5] as i16);
-            self.core
-                .chr_ram
-                .set_bank(4, (self.registers[0] & 0b1111_1110) as i16);
-            self.core
-                .chr_ram
-                .set_bank(5, (self.registers[0] & 0b1111_1110) as i16 + 1);
-            self.core
-                .chr_ram
-                .set_bank(6, (self.registers[1] & 0b1111_1110) as i16);
-            self.core
-                .chr_ram
-                .set_bank(7, (self.registers[1] & 0b1111_1110) as i16 + 1);
+            self.set_chr_bank(0, self.registers[2]);
+            self.set_chr_bank(1, self.registers[3]);
+            self.set_chr_bank(2, self.registers[4]);
+            self.set_chr_bank(3, self.registers[5]);
+            self.set_chr_bank(4, self.registers[0] & 0b1111_1110);
+            self.set_chr_bank(5, (self.registers[0] & 0b1111_1110) + 1);
+            self.set_chr_bank(6, self.registers[1] & 0b1111_1110);
+            self.set_chr_bank(7, (self.registers[1] & 0b1111_1110) + 1);
         }
 
         if self.prg_bank_mode == 0 {
@@ -155,7 +149,7 @@ impl MMC3 {
     }
 }
 
-impl Mapper for MMC3 {
+impl Mapper for MMC3TQRom {
     fn read_cpu(&mut self, addr: u16) -> u8 {
         self.core.read_cpu(addr)
     }
