@@ -54,15 +54,19 @@ On my system, the only way to get acceptable performance is cargo run/build --re
     - [X] Mapper 0 
     - [X] Mapper 3 
     - [X] Mapper 7 
-    - [ ] Mapper 206 (in progress)
+    - [X] Mapper 206
     - [X] Mapper 11 
     - [ ] Mapper 5 
     - [ ] Mapper 19
 - [ ] Related Mappers
+    - [X] Mapper 76
+    - [X] Mapper 88
     - [X] Mapper 94
+    - [X] Mapper 95
     - [X] Mapper 105
     - [X] Mapper 118
     - [X] Mapper 119
+    - [X] Mapper 154
     - [X] Mapper 155
     - [X] Mapper 180
     - [X] Mapper 185
