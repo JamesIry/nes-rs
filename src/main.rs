@@ -14,6 +14,7 @@ use crate::nes::controllers::JoyPadButton;
 
 pub mod bus;
 pub mod cpu;
+pub mod cpu2;
 pub mod nes;
 pub mod ram;
 
