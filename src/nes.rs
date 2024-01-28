@@ -14,10 +14,6 @@ use ppu::PPU;
 
 use self::controllers::{Controller, NulController};
 use self::ppu::PixelInfo;
-#[cfg(test)]
-mod integration_tests {
-    mod nestest;
-}
 
 pub struct NES {
     cpu: Rc<RefCell<CPU>>,
@@ -139,4 +135,9 @@ impl Default for NES {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    mod nestest;
 }

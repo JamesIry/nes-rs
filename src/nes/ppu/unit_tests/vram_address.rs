@@ -70,10 +70,10 @@ fn test_vram_address_x_y() {
     reg2.set_vertical_nametable_selected(true);
     reg2.copy_y_from(&reg);
     assert_eq!(0x12, reg2.get_x());
-    assert_eq!(0b01, reg2.get_nametable_bits());
+    assert_eq!(0b11, reg2.get_nametable_bits());
     assert_eq!(0x12, reg2.get_x());
     assert_eq!(0x34, reg2.get_y());
-    assert_eq!(0b01, reg2.get_nametable_bits());
+    assert_eq!(0b11, reg2.get_nametable_bits());
 }
 
 #[test]
