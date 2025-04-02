@@ -157,9 +157,9 @@ impl MMC1 {
 
         let sram_size = self.core.sram.get_memory_size_k();
         if sram_size == 16 {
-            self.sram_bank_reg = value >> 3 & 0b00000001;
+            self.sram_bank_reg = (value >> 3) & 0b00000001;
         } else {
-            self.sram_bank_reg = value >> 2 & 0b00000011;
+            self.sram_bank_reg = (value >> 2) & 0b00000011;
         }
 
         let prg_rom_size = self.core.prg_rom.get_memory_size_k();

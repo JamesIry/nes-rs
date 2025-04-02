@@ -827,7 +827,7 @@ impl CPU {
     }
 
     fn to_word(low_byte: u8, high_byte: u8) -> u16 {
-        (high_byte as u16) << 8 | (low_byte as u16)
+        ((high_byte as u16) << 8) | (low_byte as u16)
     }
 
     fn push(&mut self, mode: Mode) -> (PageBoundary, Branch) {

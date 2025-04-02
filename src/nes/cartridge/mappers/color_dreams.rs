@@ -22,7 +22,7 @@ impl ColorDreams {
             ((self.core.chr_ram.get_bank(0) << 4) as u8) | (self.core.prg_rom.get_bank(0) as u8);
         self.core
             .chr_ram
-            .set_bank(0, (value & (0b11110000) >> 4) as i16);
+            .set_bank(0, (value & ((0b11110000) >> 4)) as i16);
         self.core.prg_rom.set_bank(0, (value & 0b00000011) as i16);
 
         old

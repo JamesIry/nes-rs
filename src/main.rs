@@ -117,7 +117,7 @@ where
         let (frame_complete, pixel_info, sample_opt) = nes.clock();
 
         if let Some(p) = pixel_info {
-            let color = (p.r as u32) << 16 | (p.g as u32) << 8 | (p.b as u32);
+            let color = ((p.r as u32) << 16) | ((p.g as u32) << 8) | (p.b as u32);
             let (x, y) = (p.x as usize, p.y as usize);
             screen_buffer[y * NES_WIDTH + x] = color;
         }
