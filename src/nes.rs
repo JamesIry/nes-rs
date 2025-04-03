@@ -5,7 +5,7 @@ mod ppu;
 
 use std::{cell::RefCell, rc::Rc};
 
-use crate::cpu::{CPUCycleType, CPUType, CPU};
+use crate::cpu::{CPU, CPUCycleType, CPUType};
 use crate::ram::RAM;
 use anyhow::Result;
 use apu::APU;

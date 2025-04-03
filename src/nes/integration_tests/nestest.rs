@@ -9,7 +9,7 @@ use crate::cpu::decode::decode;
 use crate::cpu::flags::StatusFlags;
 use crate::cpu::instructions::Instruction;
 use crate::cpu::monitor::Monitor;
-use crate::cpu::{CPUType, CPU};
+use crate::cpu::{CPU, CPUType};
 use crate::nes::apu::APU;
 use crate::nes::cartridge::{Cartridge, CartridgeCPUPort};
 use crate::nes::ppu::PPU;

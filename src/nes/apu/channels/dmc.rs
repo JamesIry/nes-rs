@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    cpu::{CPUCycleType, CPU},
+    cpu::{CPU, CPUCycleType},
     nes::apu::{APUCycleType, SoundEnableFlags},
 };
 

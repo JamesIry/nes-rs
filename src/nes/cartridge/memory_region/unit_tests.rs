@@ -1,6 +1,6 @@
 use crate::nes::cartridge::{
-    memory_region::{MemoryRegion, MemoryType},
     MirrorType,
+    memory_region::{MemoryRegion, MemoryType},
 };
 
 #[test]

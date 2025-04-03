@@ -192,8 +192,17 @@ impl NesHeader {
         }
 
         let chr_rom_ram = if chr_is_rom { "rom" } else { "ram" };
-        println!("sram_size {:#06x} | peristence {} | trainer {} | prg rom size {:#06x} | chr {} size {:#06x} | screen mirroring {:?} | mapper {}",
-        sram_size, sram_is_persistent, has_trainer, prg_rom_size, chr_rom_ram, chr_rom_size, mirror_type, mapper_number);
+        println!(
+            "sram_size {:#06x} | peristence {} | trainer {} | prg rom size {:#06x} | chr {} size {:#06x} | screen mirroring {:?} | mapper {}",
+            sram_size,
+            sram_is_persistent,
+            has_trainer,
+            prg_rom_size,
+            chr_rom_ram,
+            chr_rom_size,
+            mirror_type,
+            mapper_number
+        );
 
         if _ines_ver != 0 {
             Err(CartridgeError::UnsupportedInesVersion)?;

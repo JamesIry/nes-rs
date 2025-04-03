@@ -8,11 +8,11 @@ use std::{cell::RefCell, ops::Not, rc::Rc};
 
 use crate::{
     bus::{BusDevice, InterruptFlags},
-    cpu::{CPUCycleType, CPU},
+    cpu::{CPU, CPUCycleType},
 };
 
 use self::channels::{
-    dmc::DMCChannel, noise::NoiseChannel, pulse::PulseChannel, triangle::TriangleChannel, Channel,
+    Channel, dmc::DMCChannel, noise::NoiseChannel, pulse::PulseChannel, triangle::TriangleChannel,
 };
 
 const RANGE_START: u16 = 0x4000;

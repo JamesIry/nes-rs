@@ -4,8 +4,8 @@ use super::PPU;
 
 use crate::{
     bus::{BusDevice, InterruptFlags},
-    cpu::{CPUCycleType, CPUType, CPU},
-    nes::apu::{APUCycleType, APU},
+    cpu::{CPU, CPUCycleType, CPUType},
+    nes::apu::{APU, APUCycleType},
     nes::cartridge::{Cartridge, CartridgeCPUPort},
     ram::RAM,
 };
@@ -44,7 +44,7 @@ fn test_dma() {
         ppu.borrow_mut().write(0x2003, 0x02);
         apu.borrow_mut().write(0x4014, 0x03);
         let _ = apu.borrow_mut().clock(CPUCycleType::Write); // process the write
-                                                             // make sure rdy didn't get cleared with that tick, because it was a write cycle
+        // make sure rdy didn't get cleared with that tick, because it was a write cycle
         assert!(cpu.borrow().is_rdy());
         if alignment == 1 {
             apu.borrow_mut().cycle_type = APUCycleType::Put;

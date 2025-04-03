@@ -1,12 +1,12 @@
 use anyhow::Result;
 use blip_buf::BlipBuf;
 use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, FromSample, Sample, SizedSample, StreamConfig,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use crossbeam_channel::bounded;
 use minifb::{Key, KeyRepeat, Scale, ScaleMode, Window, WindowOptions};
-use nes::{controllers::JoyPad, NES};
+use nes::{NES, controllers::JoyPad};
 use std::collections::HashSet;
 use std::{cell::RefCell, env, rc::Rc, time::Instant};
 
@@ -199,11 +199,7 @@ where
 }
 
 fn check_keycode(keys: &HashSet<Key>, key: Key, button: JoyPadButton) -> u8 {
-    if keys.contains(&key) {
-        0 | button
-    } else {
-        0
-    }
+    if keys.contains(&key) { 0 | button } else { 0 }
 }
 
 fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> i16)

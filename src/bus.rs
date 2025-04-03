@@ -26,7 +26,7 @@ impl Bus {
 
     pub fn read(&self, addr: u16) -> u8 {
         for device in &self.bus_devices {
-            if device.0 .0 <= addr && addr <= device.0 .1 {
+            if device.0.0 <= addr && addr <= device.0.1 {
                 return device.1.borrow_mut().read(addr);
             }
         }
@@ -35,7 +35,7 @@ impl Bus {
 
     pub fn write(&self, addr: u16, data: u8) -> u8 {
         for device in &self.bus_devices {
-            if device.0 .0 <= addr && addr <= device.0 .1 {
+            if device.0.0 <= addr && addr <= device.0.1 {
                 return device.1.borrow_mut().write(addr, data);
             }
         }
